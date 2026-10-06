@@ -1,0 +1,43 @@
+{
+  "navigation_loses_merge_files": {
+    "before": 2,
+    "after": 1
+  },
+  "invalid_range_action_enabled": {
+    "range": "3-1",
+    "action": "normal"
+  },
+  "preview_click_changes_split_mode": {
+    "before": "Ranges",
+    "after": "Pages"
+  },
+  "multiple_compression_inputs_ignored": {
+    "chosen": 2,
+    "retained": 1
+  },
+  "same_tool_resets_range": {
+    "before": [
+      "2",
+      "2"
+    ],
+    "after": [
+      "1",
+      "3"
+    ]
+  },
+  "overlapping_ranges_deduplicated": {
+    "requested_pages": [
+      1,
+      2,
+      2,
+      3
+    ],
+    "actual_pages": 3
+  },
+  "bad_merge_file_blocks_recovery": {
+    "loaded_cards": 0,
+    "files": 2,
+    "total": 0,
+    "error": "PDF cannot be opened"
+  }
+}
