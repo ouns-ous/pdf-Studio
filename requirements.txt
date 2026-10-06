@@ -1,0 +1,4 @@
+pypdf==6.19.0
+Pillow==12.3.0
+pyinstaller==6.22.3
+pymupdf==1.28.2
