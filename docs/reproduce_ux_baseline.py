@@ -1,3 +1,4 @@
+"""Historical reproducer for d029cce; current regressions live in verify_ui.py."""
 import json, sys, time, tempfile
 from pathlib import Path
 from unittest.mock import patch

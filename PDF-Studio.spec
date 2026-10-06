@@ -1,11 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import collect_data_files
+
 a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=collect_data_files('tkinterdnd2'),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

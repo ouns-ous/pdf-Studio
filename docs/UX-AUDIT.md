@@ -10,7 +10,7 @@ Le catalogue contient **28 cartes, dont 6 reliées à un traitement**. Les 22 au
 
 **Priorité : rendre prévisible le parcours choisir → importer → configurer → traiter → récupérer → continuer.** L’ajout de cartes et le polissage des couleurs passent après cette cohérence.
 
-Cette livraison est une étude et un cahier de corrections. Les problèmes décrits ci-dessous ne sont pas encore corrigés par ce commit.
+Ce document conserve le diagnostic de la version auditée. Les corrections de la version 1.3 sont décrites dans [UX-RELEASE.md](UX-RELEASE.md) ; les preuves ci-dessous restent celles de la version initiale.
 
 ## Méthode et limites
 

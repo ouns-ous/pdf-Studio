@@ -1,23 +1,42 @@
-# PDF Studio
+# PDF Studio 1.3
 
-Windows desktop PDF utilities with page thumbnails, a dedicated options panel, click-to-select pages, merge ordering, split ranges, deletion, rotation, three image compression levels, and images to PDF. All processing is local.
+A local Windows PDF app with seven working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, and Images to PDF.
 
-Run `dist/PDF-Studio-Setup.exe` to install PDF Studio for the current Windows user. Setup adds a Start Menu shortcut, offers an optional desktop shortcut, and registers an uninstaller in Windows Installed apps. The default install folder is `%LOCALAPPDATA%\Programs\PDF Studio`. No Python installation or administrator access is required.
+## Install or run
 
-`dist/PDF-Studio.exe` is also available as a portable executable.
+- Install: `dist/PDF-Studio-Setup.exe` (per-user installation; no administrator rights or Python required).
+- Portable: `dist/PDF-Studio.exe`.
+- Develop: `python -m pip install -r requirements.txt`, then `python app.py`.
 
-To develop: `python -m pip install -r requirements.txt`, then `python app.py`.
+## Your workflow
 
-To build: `python -m PyInstaller --noconfirm --onefile --windowed --exclude-module numpy --exclude-module scipy --exclude-module matplotlib --exclude-module pandas --name PDF-Studio app.py`.
+Choose an available tool, select or drop files, review the previews and output summary, then process. Each tool keeps its own files and settings while the app remains open. Use **New task** to reset explicitly.
 
-To package the installer with Inno Setup 6: `ISCC.exe installer.iss`.
+The result screen lets you save, open, reveal the folder, change settings, or continue with the generated PDFs in another tool. Processing happens in a temporary directory. Cancel stops the isolated worker without writing a partial file to your chosen destination. Closing or replacing an unsaved result asks you to save or discard it. Task state is not persisted across app restarts.
 
-Choose a tool in the top bar, select a file, configure the panel on the right, then press the red action button. The result dialog provides Open result and Show in folder.
+- **Merge:** add/remove files, drag to reorder, move with arrows or Alt+Left/Right, sort by filename, undo.
+- **Split:** Custom ranges, Fixed pages per file, or individual Pages. Choose one combined PDF or separate PDFs. Multiple outputs are bundled in ZIP; one output is a PDF. Overlapping combined ranges preserve repeated pages in range order.
+- **Compress:** process a batch, choose one of three image-quality levels, inspect before/after sizes for every file. Already optimized files are reported honestly. Text remains vector-based; images may lose detail. Output never grows just because of recompression.
+- **Organize:** reorder, rotate, mark pages for removal, restore and undo. Preview changes before processing.
+- **Remove pages:** explicit removal markers; at least one page must remain.
+- **Rotate:** rotate individual, selected or all pages with updated previews.
+- **Images to PDF:** order images, choose A4/Letter/Original, portrait/landscape and margins. Original follows the image dimensions at 150 DPI; orientation applies to A4/Letter. Update preview after editing margins.
 
-Split supports editable start/end ranges or individual pages selected from thumbnails. Separate ranges export as PDFs in one ZIP; the merge checkbox exports one PDF. Click previews to select pages for deletion or rotation. Select all and Clear selection are available. Page previews are loaded in batches of 12 with Previous/Next controls. PDF tools reuse the loaded PDF when switching; image conversion uses a separate file selection.
+Input errors appear on individual cards so valid files remain accessible. Single-PDF tools use a single-file picker and reject multiple dropped inputs explicitly. Password-protected PDFs require an unlocked copy.
 
-Compression offers Extreme, Recommended and Less compression, with different image resolution and JPEG quality settings. Text remains vector-based. When compression would increase file size, the original bytes are saved instead. Run `python verify.py` and `python verify_ui.py` for functional checks.
+Ctrl+O imports; Ctrl+Z undoes file/page changes. Home cards and controls support keyboard focus. There are no inactive conversion cards presented as working tools. Office conversion, OCR, signatures, cloud storage and AI features are not included.
 
-This is an initial independent application; it does not include Word conversion, OCR or electronic signatures. The executable is unsigned.
+## Build and verify
 
-The app opens on a tool catalog with category filters, inspired by the supplied reference screenshots. Merge, Split, Compress, Organize (delete pages), Rotate and JPG/images to PDF work locally. Other catalog entries are explicitly marked Coming soon. No account or cloud login is required.
+```powershell
+python verify.py
+python verify_ui.py
+python -m PyInstaller --noconfirm PDF-Studio.spec
+& '.\.tools\inno\ISCC.exe' installer.iss
+```
+
+The spec includes TkDnD data for native file drops. `verify_ui.py` uses generated PDFs to check navigation, file recovery, split contracts, order/rotation, undo, batch compression, saving/retry, continuation, cancellation and preservation of original bytes. Run the built executable with `--smoke-test` to verify Tk/TkDnD startup and a spawned PDF merge inside the packaged app. `verify_installer.ps1` can test a temporary per-user installation only when PDF Studio is not already installed.
+
+The source is separated into `pdf_workflow.py` (sessions and output validation), `jobs.py` (isolated processing), `pdf_tools.py` (PDF primitives) and `app.py` (desktop UI).
+
+The executable is unsigned. See [the UX audit](docs/UX-AUDIT.md) and [the implementation notes](docs/UX-RELEASE.md).
