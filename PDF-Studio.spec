@@ -2,6 +2,15 @@
 
 
 from PyInstaller.utils.hooks import collect_data_files
+from pathlib import Path
+import os
+import sys
+
+# Conda keeps Tk and other native dependencies outside the Python executable directory.
+# Make their location explicit so builds also work without an activated Conda shell.
+conda_bin = Path(sys.prefix) / "Library" / "bin"
+if conda_bin.is_dir():
+    os.environ["PATH"] = str(conda_bin) + os.pathsep + os.environ.get("PATH", "")
 
 a = Analysis(
     ['app.py'],

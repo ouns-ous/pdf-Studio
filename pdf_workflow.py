@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from copy import deepcopy
 from pdf_tools import selection
+from pdf_features import (validate_password, watermark_settings, chosen_pages,
+                          page_number_settings, crop_settings)
 
 TOOLS = {
     "Merge PDF": (
@@ -49,6 +51,15 @@ TOOLS = {
     ),
 }
 BATCH = {"Merge PDF", "Compress PDF", "Images to PDF"}
+TOOLS.update({
+    "Protect PDF": ("PDF Security", "Require a password to open your PDF.", "#497dae", "◆"),
+    "Unlock PDF": ("PDF Security", "Remove PDF encryption using its password.", "#497dae", "◇"),
+    "Watermark": ("Edit PDF", "Preview a text watermark on the pages you choose.", "#ab6796", "T"),
+    "PDF to JPG": ("Convert PDF", "Export PDF pages as JPG images at your chosen resolution.", "#d4c52c", "JPG"),
+    "Page numbers": ("Edit PDF", "Add page numbers with your choice of range and starting number.", "#ab6796", "1 2"),
+    "Crop PDF": ("Edit PDF", "Trim visible page margins and preview the result.", "#ab6796", "⊡"),
+})
+PAGE_EDITS = {"Watermark", "Page numbers", "Crop PDF"}
 
 
 @dataclass
@@ -74,6 +85,41 @@ class Session:
     loaded: bool = False
     result: dict | None = None
     history: list = field(default_factory=list)
+    password: str = field(default="", repr=False)
+    confirmation: str = field(default="", repr=False)
+    input_password: str = field(default="", repr=False)
+    watermark_text: str = "CONFIDENTIAL"
+    watermark_pages: str = ""
+    watermark_size: str = "36"
+    watermark_opacity: str = "30"
+    watermark_position: str = "Center"
+    target_pages: str = ""
+    jpg_dpi: str = "150"
+    jpg_quality: str = "85"
+    number_start: str = "1"
+    number_size: str = "12"
+    number_position: str = "Bottom"
+    number_style: str = "Number"
+    crop_left: str = "5"
+    crop_top: str = "5"
+    crop_right: str = "5"
+    crop_bottom: str = "5"
+
+    def watermark(self):
+        return watermark_settings(self.watermark_text, self.watermark_pages,
+                                  self.page_count, self.watermark_size,
+                                  self.watermark_opacity, self.watermark_position)
+
+    def page_edit(self):
+        if self.mode == "Watermark":
+            return self.watermark()
+        if self.mode == "Page numbers":
+            return page_number_settings(self.target_pages, self.page_count, self.number_start,
+                                        self.number_size, self.number_position, self.number_style)
+        if self.mode == "Crop PDF":
+            return crop_settings(self.target_pages, self.page_count,
+                                 [self.crop_left, self.crop_top, self.crop_right, self.crop_bottom])
+        return None
 
     @property
     def page_count(self):
@@ -133,6 +179,22 @@ class Session:
         if self.mode == "Merge PDF" and len(self.files) < 2:
             raise ValueError("Add at least one more PDF to merge your files.")
         count, pages, warning = 1, sum(self.counts), ""
+        if self.mode == "Protect PDF":
+            validate_password(self.password, self.confirmation)
+            warning = "The saved PDF will require your password to open."
+        elif self.mode == "Unlock PDF":
+            warning = "The saved copy will open without a password."
+        elif self.mode == "Watermark":
+            settings = self.watermark()
+            warning = f"Text watermark on {len(settings['indices'])} page(s). Long text shrinks to fit."
+        elif self.mode in PAGE_EDITS:
+            settings = self.page_edit()
+            warning = f"Apply changes to {len(settings['indices'])} page(s)."
+        elif self.mode == "PDF to JPG":
+            count = pages = len(chosen_pages(self.target_pages, self.page_count))
+            if self.jpg_dpi not in ("72", "150", "300") or self.jpg_quality not in ("60", "85", "95"):
+                raise ValueError("Choose the image resolution and quality.")
+            warning = f"{self.jpg_dpi} DPI · JPG quality {self.jpg_quality}%."
         if self.mode == "Split PDF":
             groups = self.groups()
             pages = sum(map(len, groups))
@@ -164,7 +226,8 @@ class Session:
         return {
             "count": count,
             "pages": pages,
-            "extension": ".zip" if count > 1 else ".pdf",
+            "extension": ".zip" if count > 1 else (".jpg" if self.mode == "PDF to JPG" else ".pdf"),
+            "kind": "JPG image(s)" if self.mode == "PDF to JPG" else "PDF file(s)",
             "warning": warning,
         }
 
@@ -183,4 +246,11 @@ class Session:
             "page_size": self.page_size,
             "orientation": self.orientation,
             "margin": int(self.margin),
+            "password": self.password if self.mode == "Protect PDF" else "",
+            "input_password": self.input_password if self.mode == "Unlock PDF" else "",
+            "watermark": self.watermark() if self.mode == "Watermark" else None,
+            "page_edit": self.page_edit(),
+            "jpg_pages": chosen_pages(self.target_pages, self.page_count) if self.mode == "PDF to JPG" else [],
+            "jpg_dpi": int(self.jpg_dpi),
+            "jpg_quality": int(self.jpg_quality),
         }

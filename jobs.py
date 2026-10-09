@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 import zipfile
 from pathlib import Path
 from io import BytesIO
@@ -9,6 +10,8 @@ import pymupdf
 from PIL import Image, ImageOps
 from pypdf import PdfReader, PdfWriter
 from pdf_tools import process
+from pdf_features import authenticate, apply_page_edit, validate_password
+from pdf_workflow import PAGE_EDITS
 
 
 def image_page_size(image, size, orientation):
@@ -90,11 +93,46 @@ def execute(request, folder, progress=lambda text: None):
                     )
             doc.save(output, deflate=True)
         results.append(output)
-    else:
+    elif mode == "PDF to JPG":
+        with pymupdf.open(files[0]) as doc:
+            authenticate(doc, "")
+            for index in request["jpg_pages"]:
+                progress(f"Exporting page {index + 1} of {len(doc)}…")
+                page = doc[index]
+                scale = request["jpg_dpi"] / 72
+                if page.rect.width * page.rect.height * scale * scale > 40_000_000:
+                    raise ValueError(f"Page {index + 1} is too large at this resolution. Choose a lower DPI.")
+                output = folder / f"{Path(files[0]).stem}-page-{index+1:04d}.jpg"
+                pixmap = page.get_pixmap(dpi=request["jpg_dpi"], colorspace=pymupdf.csRGB, alpha=False)
+                pixmap.save(output, jpg_quality=request["jpg_quality"])
+                results.append(output)
+    elif mode in {"Protect PDF", "Unlock PDF"} | PAGE_EDITS:
+        output = folder / f"{Path(files[0]).stem}-{mode.lower().replace(' ', '-')}.pdf"
+        with pymupdf.open(files[0]) as doc:
+            authenticate(doc, request.get("input_password", ""))
+            if mode == "Protect PDF":
+                password = request["password"]
+                validate_password(password, password)
+                progress("Protecting your PDF…")
+                doc.save(output, encryption=pymupdf.PDF_ENCRYPT_AES_256,
+                         user_pw=password, owner_pw=password, deflate=True)
+            else:
+                if mode in PAGE_EDITS:
+                    settings = request["page_edit"]
+                    for index in settings["indices"]:
+                        progress(f"Applying changes to page {index + 1} of {len(doc)}…")
+                        apply_page_edit(doc[index], mode, settings)
+                else:
+                    progress("Removing PDF encryption…")
+                doc.save(output, encryption=pymupdf.PDF_ENCRYPT_NONE, deflate=True)
+        results.append(output)
+    elif mode == "Merge PDF":
         progress("Merging your PDF files…")
         output = folder / "merged.pdf"
         process("Merge PDF", files, output)
         results.append(output)
+    else:
+        raise ValueError("Choose a supported PDF tool.")
     if len(results) > 1:
         output = folder / (mode.lower().replace(" ", "-") + ".zip")
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -104,7 +142,9 @@ def execute(request, folder, progress=lambda text: None):
         output = results[0]
     return {
         "path": str(output),
-        "pdfs": [str(item) for item in results],
+        "files": [str(item) for item in results],
+        "pdfs": [str(item) for item in results if item.suffix == ".pdf"],
+        "images": [str(item) for item in results if item.suffix == ".jpg"],
         "stats": stats,
         "pages": request["contract"]["pages"],
         "saved": "",
@@ -116,7 +156,15 @@ def run_job(request, folder):
     def report(payload):
         temporary = Path(folder) / "status-writing.json"
         temporary.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(temporary, Path(folder) / "status.json")
+        # Windows can briefly deny replacement while the UI is reading status.
+        for attempt in range(50):
+            try:
+                os.replace(temporary, Path(folder) / "status.json")
+                break
+            except PermissionError:
+                if attempt == 49:
+                    raise
+                time.sleep(0.02)
 
     try:
         result = execute(

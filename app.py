@@ -6,7 +6,7 @@ import shutil
 import sys
 import tempfile
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -14,9 +14,10 @@ from io import BytesIO
 from PIL import Image, ImageOps, ImageTk
 import pymupdf
 from tkinterdnd2 import TkinterDnD, DND_FILES
-from pdf_workflow import Session, TOOLS, BATCH
+from pdf_workflow import Session, TOOLS, BATCH, PAGE_EDITS
 from jobs import run_job, image_page_size
 from pdf_tools import selection
+from pdf_features import authenticate, apply_page_edit
 
 BG, WHITE, INK, MUTED, RED = "#f5f5fa", "#ffffff", "#33333b", "#70717e", "#ee2e2e"
 
@@ -66,7 +67,7 @@ class App(TkinterDnD.Tk):
             button.pack(side="left", padx=5)
             self.nav[mode] = button
         for text, modes in [
-            ("CONVERT PDF ▾", ["Images to PDF"]),
+            ("CONVERT PDF ▾", ["Images to PDF", "PDF to JPG"]),
             ("ALL PDF TOOLS ▾", list(TOOLS)),
         ]:
             button = self.button(header, text, lambda: None, small=True)
@@ -221,7 +222,7 @@ class App(TkinterDnD.Tk):
         ).pack(pady=(0, 25))
         filters = tk.Frame(self.body, bg=BG)
         filters.pack()
-        for name in ["All", "Organize PDF", "Optimize PDF", "Convert PDF", "Edit PDF"]:
+        for name in ["All", "Organize PDF", "Optimize PDF", "Convert PDF", "Edit PDF", "PDF Security"]:
             button = self.button(filters, name, lambda c=name: self.show_home(c))
             button.config(
                 bg=INK if name == category else WHITE,
@@ -266,7 +267,7 @@ class App(TkinterDnD.Tk):
 
         grid.bind("<Configure>", layout)
         self.status.set(
-            "7 working tools · Ctrl+O to import · Ctrl+Z to undo changes inside a tool."
+            f"{len(TOOLS)} working tools · Ctrl+O to import · Ctrl+Z to undo changes inside a tool."
         )
 
     def change(self, mode):
@@ -349,8 +350,29 @@ class App(TkinterDnD.Tk):
         else:
             if not self.resolve_unsaved(s):
                 return
+            password = ""
+            if self.mode == "Unlock PDF":
+                try:
+                    with pymupdf.open(files[0]) as doc:
+                        if doc.is_pdf and not doc.needs_pass and not (doc.metadata or {}).get("encryption"):
+                            messagebox.showinfo("Already unlocked", "This PDF already opens without encryption. Choose another PDF.", parent=self)
+                            return
+                        if doc.needs_pass:
+                            while True:
+                                password = simpledialog.askstring(
+                                    "PDF password", "Enter the password to open this PDF:",
+                                    show="*", parent=self)
+                                if password is None:
+                                    return
+                                if doc.authenticate(password):
+                                    break
+                                messagebox.showerror("Incorrect password",
+                                                     "Try the PDF password again.", parent=self)
+                except Exception:
+                    # Keep invalid inputs visible as removable error cards.
+                    password = ""
             self.sessions[self.mode] = Session(
-                self.mode, files=[str(Path(files[0]).resolve())]
+                self.mode, files=[str(Path(files[0]).resolve())], input_password=password
             )
         self.session.offset = 0
         self.refresh()
@@ -366,9 +388,11 @@ class App(TkinterDnD.Tk):
             self.loading = False
             return
         request = deepcopy(s)
+        self.edit_preview_settings = None
 
         def load():
             counts, errors, previews = [], {}, []
+            settings = None
             for i, path in enumerate(request.files):
                 try:
                     if request.mode == "Images to PDF":
@@ -411,12 +435,19 @@ class App(TkinterDnD.Tk):
                             if not doc.is_pdf:
                                 raise ValueError("Choose a PDF document.")
                             if doc.needs_pass:
-                                raise ValueError(
-                                    "Password protected. Choose an unlocked copy."
-                                )
+                                if request.mode == "Unlock PDF":
+                                    authenticate(doc, request.input_password)
+                                else:
+                                    raise ValueError("Password protected. Open it with Unlock PDF first.")
                             if not len(doc):
                                 raise ValueError("This PDF contains no pages.")
                             counts.append(len(doc))
+                            if request.mode in PAGE_EDITS:
+                                request.counts = list(counts)
+                                try:
+                                    settings = request.page_edit()
+                                except ValueError:
+                                    settings = None
                             indices = (
                                 [0]
                                 if request.mode in BATCH
@@ -430,6 +461,9 @@ class App(TkinterDnD.Tk):
                                     and not request.offset <= i < request.offset + 12
                                 ):
                                     continue
+                                if request.mode in PAGE_EDITS:
+                                    if settings and page_index in settings["indices"]:
+                                        apply_page_edit(doc[page_index], request.mode, settings)
                                 previews.append(
                                     (
                                         i if request.mode in BATCH else page_index,
@@ -440,12 +474,12 @@ class App(TkinterDnD.Tk):
                     if len(counts) <= i:
                         counts.append(0)
                     errors[i] = (
-                        "Password protected. Choose an unlocked copy."
+                        "Password protected. Open it with Unlock PDF first."
                         if "Password protected" in str(error)
                         else "Cannot read this file. Remove it or choose a valid "
                         + ("image." if request.mode == "Images to PDF" else "PDF.")
                     )
-            self.events.put(("preview", generation, counts, errors, previews))
+            self.events.put(("preview", generation, counts, errors, previews, settings))
 
         self.preview_pool.submit(load)
 
@@ -457,7 +491,8 @@ class App(TkinterDnD.Tk):
         )
         return Image.open(BytesIO(pix.tobytes("png"))).copy()
 
-    def receive_previews(self, counts, errors, previews):
+    def receive_previews(self, counts, errors, previews, edit_settings=None):
+        self.edit_preview_settings = edit_settings
         s = self.session
         s.counts, s.errors, s.loaded = counts, errors, True
         self.loading = False
@@ -731,6 +766,81 @@ class App(TkinterDnD.Tk):
                     self.button(
                         self.options, "Restore all pages", self.restore_all
                     ).pack(fill="x", pady=4)
+        elif self.mode == "Protect PDF":
+            self.password_entries = []
+            for key, title in [("password", "Password"), ("confirmation", "Confirm password")]:
+                self.label(self.options, title, 12, True).pack(anchor="w", pady=(14, 6))
+                entry = tk.Entry(self.options, show="*", font=("Segoe UI", 12))
+                # Keep the traced variable alive for the lifetime of this field.
+                entry._var = self.variable(key)
+                entry.config(textvariable=entry._var)
+                entry.pack(fill="x")
+                self.password_entries.append(entry)
+            show_password = tk.BooleanVar(value=False)
+            toggle = tk.Checkbutton(self.options, text="Show password", bg=WHITE,
+                                   variable=show_password,
+                                   command=lambda: [e.config(show="" if show_password.get() else "*")
+                                                    for e in self.password_entries])
+            toggle._var = show_password
+            toggle.pack(anchor="w", pady=12)
+            note = self.label(self.options, "Use 8–40 characters. Keep your password: you will need it to open the saved PDF.", 11)
+            note.config(wraplength=290)
+            note.pack(anchor="w", pady=10)
+        elif self.mode == "Unlock PDF":
+            note = self.label(self.options, "Your PDF is readable. Save an unlocked copy that opens without a password. The original file stays protected.", 12)
+            note.config(wraplength=290)
+            note.pack(anchor="w", pady=18)
+        elif self.mode == "Watermark":
+            self.watermark_vars = {}
+            for key, title in [("watermark_text", "Watermark text"),
+                               ("watermark_pages", "Pages (blank = all; e.g. 1,3-5)"),
+                               ("watermark_size", "Font size (8–100 pt)"),
+                               ("watermark_opacity", "Opacity (5–100%)")]:
+                self.label(self.options, title, 11, True).pack(anchor="w", pady=(12, 5))
+                var = self.variable(key)
+                self.watermark_vars[key] = var
+                tk.Entry(self.options, textvariable=var, font=("Segoe UI", 12)).pack(fill="x")
+            self.label(self.options, "Position", 11, True).pack(anchor="w", pady=(12, 5))
+            var = self.variable("watermark_position")
+            self.watermark_vars["watermark_position"] = var
+            ttk.Combobox(self.options, textvariable=var, values=["Top", "Center", "Bottom"],
+                         state="readonly").pack(fill="x")
+            self.button(self.options, "Update preview", self.refresh).pack(fill="x", pady=14)
+            self.label(self.options, "Long text shrinks to fit the page.", 9, color=MUTED).pack(anchor="w")
+        elif self.mode in ("PDF to JPG", "Page numbers", "Crop PDF"):
+            self.feature_vars = {}
+
+            def field(key, title, choices=None):
+                self.label(self.options, title, 11, True).pack(anchor="w", pady=(12, 5))
+                var = self.variable(key)
+                self.feature_vars[key] = var
+                if choices:
+                    widget = ttk.Combobox(self.options, textvariable=var,
+                                          values=choices, state="readonly")
+                else:
+                    widget = tk.Entry(self.options, textvariable=var, font=("Segoe UI", 12))
+                widget.pack(fill="x")
+
+            field("target_pages", "Pages (blank = all; e.g. 1,3-5)")
+            if self.mode == "PDF to JPG":
+                field("jpg_dpi", "Resolution (DPI)", ["72", "150", "300"])
+                field("jpg_quality", "JPG quality (%)", ["60", "85", "95"])
+                note = "One image per page. Multiple images are saved in a ZIP. Pages export in document order."
+            elif self.mode == "Page numbers":
+                field("number_start", "Starting number")
+                field("number_size", "Font size (8–40 pt)")
+                field("number_position", "Position", ["Top", "Bottom"])
+                field("number_style", "Format", ["Number", "Page n of total"])
+                note = "Number selected pages in document order. The total is the last printed number."
+            else:
+                for edge in ("left", "top", "right", "bottom"):
+                    field("crop_" + edge, edge.title() + " margin (%)")
+                note = "Margins refer to the displayed page. Cropping hides content outside the page; it does not permanently erase it."
+            if self.mode in PAGE_EDITS:
+                self.button(self.options, "Update preview", self.refresh).pack(fill="x", pady=14)
+            label = self.label(self.options, note, 10, color=MUTED)
+            label.config(wraplength=290)
+            label.pack(anchor="w", pady=12)
         elif self.mode == "Images to PDF":
             for key, title, values in [
                 ("page_size", "Page size", ["A4", "Letter", "Original"]),
@@ -841,8 +951,10 @@ class App(TkinterDnD.Tk):
             if self.loading:
                 raise ValueError("Checking files and loading previews…")
             contract = self.session.contract()
+            if self.mode in PAGE_EDITS and self.session.page_edit() != self.edit_preview_settings:
+                raise ValueError("Click Update preview to review your changes.")
             message = (
-                f"Output: {contract['count']} PDF file(s), {contract['pages']} pages"
+                f"Output: {contract['count']} {contract['kind']}, {contract['pages']} pages"
                 + (" in a ZIP." if contract["count"] > 1 else ".")
             )
             if contract["warning"]:
@@ -1195,7 +1307,12 @@ class App(TkinterDnD.Tk):
     def open_preview(self, index):
         try:
             with pymupdf.open(self.session.files[0]) as doc:
+                authenticate(doc, self.session.input_password)
                 page = doc[index]
+                if self.mode in PAGE_EDITS:
+                    settings = self.session.page_edit()
+                    if index in settings["indices"]:
+                        apply_page_edit(page, self.mode, settings)
                 scale = min(700 / page.rect.width, 650 / page.rect.height)
                 pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
                 image = Image.open(BytesIO(pix.tobytes("png"))).rotate(
@@ -1325,7 +1442,7 @@ class App(TkinterDnD.Tk):
         )
         self.label(
             self.body,
-            f"{len(result['pdfs'])} PDF file(s) · {result['pages']} pages · {size_text(Path(result['path']).stat().st_size)}",
+            f"{len(result.get('files', result['pdfs']))} {'JPG image(s)' if result.get('images') else 'PDF file(s)'} · {result['pages']} pages · {size_text(Path(result['path']).stat().st_size)}",
             14,
             bg=BG,
         ).pack(pady=10)
@@ -1350,16 +1467,22 @@ class App(TkinterDnD.Tk):
         self.button(actions, "New task", self.new_task).pack(side="left", padx=5)
         continuation = tk.Frame(self.body, bg=BG)
         continuation.pack(side="bottom", pady=20)
-        self.label(continuation, "Continue with these PDFs:", 12, True, bg=BG).pack(
+        self.label(continuation, "Continue with this result:", 12, True, bg=BG).pack(
             pady=8
         )
         row = tk.Frame(continuation, bg=BG)
         row.pack()
-        for mode in ["Merge PDF", "Split PDF", "Compress PDF", "Organize PDF"]:
-            if len(result["pdfs"]) == 1 or mode in BATCH:
-                self.button(row, mode, lambda m=mode: self.continue_with(m)).pack(
-                    side="left", padx=5
-                )
+        if result.get("images"):
+            modes = ["Images to PDF"]
+        elif result["mode"] == "Protect PDF":
+            modes = ["Unlock PDF"]
+        else:
+            modes = [mode for mode in TOOLS if mode not in ("Images to PDF", "Unlock PDF")
+                     and (len(result["pdfs"]) == 1 or mode in BATCH)]
+        next_tool = ttk.Combobox(row, values=modes, state="readonly", width=24, font=("Segoe UI", 11))
+        next_tool.set(modes[0])
+        next_tool.pack(side="left", padx=5)
+        self.button(row, "Continue →", lambda: self.continue_with(next_tool.get())).pack(side="left", padx=5)
         if result["stats"]:
             wrap, _, content = self.scroll_area(self.body)
             wrap.pack(fill="both", expand=True, padx=80, pady=12)
@@ -1397,7 +1520,7 @@ class App(TkinterDnD.Tk):
             defaultextension=source.suffix,
             filetypes=[
                 (
-                    "ZIP archive" if source.suffix == ".zip" else "PDF document",
+                    { ".zip": "ZIP archive", ".jpg": "JPG image" }.get(source.suffix, "PDF document"),
                     "*" + source.suffix,
                 )
             ],
@@ -1439,7 +1562,9 @@ class App(TkinterDnD.Tk):
                 os.unlink(temporary)
 
     def continue_with(self, mode):
-        files = list(self.session.result["pdfs"])
+        files = list(self.session.result.get("images", []) if mode == "Images to PDF" else self.session.result["pdfs"])
+        if not files:
+            return
         if self.sessions[mode].files:
             if not messagebox.askyesno(
                 "Start with this result?",
@@ -1449,7 +1574,19 @@ class App(TkinterDnD.Tk):
                 return
             if not self.resolve_unsaved(self.sessions[mode]):
                 return
-        self.sessions[mode] = Session(mode, files=files)
+        password = ""
+        if mode == "Unlock PDF":
+            with pymupdf.open(files[0]) as doc:
+                if doc.needs_pass:
+                    while True:
+                        password = simpledialog.askstring("PDF password",
+                            "Enter the password to open this PDF:", show="*", parent=self)
+                        if password is None:
+                            return
+                        if doc.authenticate(password):
+                            break
+                        messagebox.showerror("Incorrect password", "Try the PDF password again.", parent=self)
+        self.sessions[mode] = Session(mode, files=files, input_password=password)
         self.mode = mode
         self.refresh()
 
