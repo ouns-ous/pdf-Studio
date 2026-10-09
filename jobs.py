@@ -10,7 +10,7 @@ import pymupdf
 from PIL import Image, ImageOps
 from pypdf import PdfReader, PdfWriter
 from pdf_tools import process
-from pdf_features import authenticate, apply_page_edit, validate_password
+from pdf_features import authenticate, apply_page_edit, validate_password, StampRenderer
 from pdf_workflow import PAGE_EDITS
 
 
@@ -105,6 +105,7 @@ def execute(request, folder, progress=lambda text: None):
                 output = folder / f"{Path(files[0]).stem}-page-{index+1:04d}.jpg"
                 pixmap = page.get_pixmap(dpi=request["jpg_dpi"], colorspace=pymupdf.csRGB, alpha=False)
                 pixmap.save(output, jpg_quality=request["jpg_quality"])
+                del pixmap  # Release this page before allocating the next raster.
                 results.append(output)
     elif mode in {"Protect PDF", "Unlock PDF"} | PAGE_EDITS:
         output = folder / f"{Path(files[0]).stem}-{mode.lower().replace(' ', '-')}.pdf"
@@ -119,9 +120,11 @@ def execute(request, folder, progress=lambda text: None):
             else:
                 if mode in PAGE_EDITS:
                     settings = request["page_edit"]
-                    for index in settings["indices"]:
-                        progress(f"Applying changes to page {index + 1} of {len(doc)}…")
-                        apply_page_edit(doc[index], mode, settings)
+                    positions = {number: rank for rank, number in enumerate(settings["indices"])}
+                    with StampRenderer() as stamps:
+                        for index in settings["indices"]:
+                            progress(f"Applying changes to page {index + 1} of {len(doc)}…")
+                            apply_page_edit(doc[index], mode, settings, stamps, positions)
                 else:
                     progress("Removing PDF encryption…")
                 doc.save(output, encryption=pymupdf.PDF_ENCRYPT_NONE, deflate=True)
@@ -135,7 +138,7 @@ def execute(request, folder, progress=lambda text: None):
         raise ValueError("Choose a supported PDF tool.")
     if len(results) > 1:
         output = folder / (mode.lower().replace(" ", "-") + ".zip")
-        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED if mode == "PDF to JPG" else zipfile.ZIP_DEFLATED) as archive:
             for item in results:
                 archive.write(item, item.name)
     else:

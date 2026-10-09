@@ -10,7 +10,7 @@ import os
 def selection(text, count):
     if not text.strip():
         return list(range(count))
-    result = []
+    result, seen = [], set()
     for part in text.split(","):
         bounds = part.strip().split("-")
         if len(bounds) > 2:
@@ -20,7 +20,8 @@ def selection(text, count):
         if first < 1 or last < first or last > count:
             raise ValueError(f"Pages must be between 1 and {count}.")
         for number in range(first - 1, last):
-            if number not in result:
+            if number not in seen:
+                seen.add(number)
                 result.append(number)
     return result
 

@@ -66,3 +66,33 @@ def check_worker():
                 from PIL import Image
                 with Image.open(result) as image:
                     assert image.format == "JPEG" and image.width > 0
+
+
+def run_smoke_check(app_factory, report_path):
+    """Return a useful result even when a windowed executable has no stderr."""
+    import traceback
+    report = Path(report_path)
+    state = {"state": "running", "phase": "startup"}
+    report.write_text(json.dumps(state), encoding="utf-8")
+    app = None
+    try:
+        app = app_factory()
+        app.withdraw()
+        app.update()
+        app.destroy()
+        app = None
+        state["phase"] = "PDF workers"
+        report.write_text(json.dumps(state), encoding="utf-8")
+        check_worker()
+        state = {"state": "passed", "phase": "complete"}
+    except Exception:
+        state = {"state": "failed", "phase": state["phase"],
+                 "error": traceback.format_exc()}
+    finally:
+        if app is not None:
+            try:
+                app.destroy()
+            except Exception:
+                pass
+        report.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return 0 if state["state"] == "passed" else 1

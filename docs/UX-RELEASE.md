@@ -1,3 +1,13 @@
+# Performance update - version 1.4.1
+
+PDF previews reuse a bounded in-memory cache and cancel superseded work. Identical watermarks reuse font resources; visible text placement is corrected for rotated and previously cropped pages. Page-selection deduplication and numbering lookup avoid repeated list scans. JPG export releases one raster before creating the next and stores JPEGs directly in ZIP.
+
+All five regression suites pass, including the new `verify_optimizations.py`. The final windowed executable passed startup and all packaged PDF worker checks with an explicit diagnostic report. Smoke checks now record startup or worker errors and return a nonzero exit code on failure. The installer was rebuilt as version 1.4.1; installation/uninstallation was not run over the existing installation.
+
+The 80-page synthetic watermark benchmark reduced output from 9,673,304 to 182,333 bytes. See [raw measurements](optimization-results.json), [review and limits](OPTIMIZATION-REVIEW.md) and [the design report](PDF-Studio-Performance-Review.docx). The six-page report retains the selected template's styles, layout and recurring elements; its fields and every rendered page were verified.
+
+---
+
 # New tools — version 1.4
 
 Six additional tools follow the same import → configure → preview → process → save/continue journey as the existing seven:

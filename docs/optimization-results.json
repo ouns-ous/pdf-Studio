@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-09",
+  "baseline_commit": "20acb370365491681fcbe4f9d133060704d2da1e",
+  "release": "1.4.1",
+  "fixture": "80 text pages of 400 x 500 points; identical Unicode watermark; three local runs per version",
+  "caveat": "Synthetic workload on this Windows machine. Timing varies by document, hardware and load.",
+  "before": {
+    "pages": 80,
+    "text": "DRAFT \u0633\u0631\u064a",
+    "python": "3.14.6",
+    "pymupdf": "1.28.2",
+    "input_bytes": 28654,
+    "output_bytes": 9673304,
+    "unique_font_objects": 161,
+    "seconds": [
+      2.1324,
+      2.2083,
+      1.8897
+    ],
+    "median_seconds": 2.1324,
+    "center_error_points": 25.568
+  },
+  "after": {
+    "pages": 80,
+    "text": "DRAFT \u0633\u0631\u064a",
+    "python": "3.14.6",
+    "pymupdf": "1.28.2",
+    "input_bytes": 28654,
+    "output_bytes": 182333,
+    "unique_font_objects": 3,
+    "seconds": [
+      0.2471,
+      0.1902,
+      0.2265
+    ],
+    "median_seconds": 0.2265,
+    "center_error_points": 0.0
+  },
+  "output_reduction_percent": 98.12
+}

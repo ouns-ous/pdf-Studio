@@ -1,6 +1,7 @@
 """Security and text stamping shared by previews and export."""
 
 from html import escape
+from collections import OrderedDict
 import pymupdf
 from pdf_tools import selection
 
@@ -23,24 +24,72 @@ def watermark_settings(text, pages, count, size, opacity, position):
     return dict(text=text, indices=indices, size=size, opacity=opacity, position=position)
 
 
-def stamp_page(page, settings):
-    # Map the displayed placement into the existing page coordinates.
-    # Keep rotation and crop boxes intact, including previously cropped PDFs.
-    width, height = page.rect.width, page.rect.height
-    margin = min(20, width / 10, height / 10)
-    band = min(settings["size"] * 2.5, height - margin * 2)
-    top = {"Top": margin, "Center": (height - band) / 2,
-           "Bottom": height - margin - band}[settings["position"]]
-    box = pymupdf.Rect(margin, top, width - margin, top + band)
-    # HTML layout supports Unicode shaping and font fallback. Escape user text.
-    page.insert_htmlbox(
-        box * page.derotation_matrix,
-        '<div dir="auto">' + escape(settings["text"]) + '</div>',
-        css=f"* {{font-family: sans-serif; font-size: {settings['size']}pt; color: #666666; text-align: center; margin: 0;}}",
-        opacity=settings["opacity"] / 100,
-        overlay=True,
-        rotate=page.rotation,
-    )
+class StampRenderer:
+    """Reuse stamp PDFs within a job instead of embedding the same fonts per page."""
+
+    def __init__(self):
+        self.templates = OrderedDict()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        for source, _ in self.templates.values():
+            source.close()
+        self.templates.clear()
+
+    def apply(self, page, settings):
+        width, height = page.rect.width, page.rect.height
+        margin = min(20, width / 10, height / 10)
+        key = (width, height, settings["text"], settings["size"], settings["opacity"])
+        if key not in self.templates:
+            source = pymupdf.open()
+            try:
+                stamp = source.new_page(width=width, height=height)
+                band = min(settings["size"] * 2.5, height - margin * 2)
+                stamp.insert_htmlbox(
+                    pymupdf.Rect(margin, margin, width - margin, margin + band),
+                    '<div dir="auto">' + escape(settings["text"]) + '</div>',
+                    css=f"* {{font-family: sans-serif; font-size: {settings['size']}pt; color: #666666; text-align: center; margin: 0;}}",
+                    opacity=settings["opacity"] / 100,
+                )
+                bounds = pymupdf.Rect()
+                for block in stamp.get_text("blocks"):
+                    if block[4].strip():
+                        bounds |= pymupdf.Rect(block[:4])
+                if bounds.is_empty:
+                    raise ValueError("The watermark must contain visible text.")
+                self.templates[key] = (source, bounds)
+            except Exception:
+                source.close()
+                raise
+        self.templates.move_to_end(key)
+        source, bounds = self.templates[key]
+        top = {"Top": margin, "Center": (height - bounds.height) / 2,
+               "Bottom": height - margin - bounds.height}[settings["position"]]
+        left = (width - bounds.width) / 2
+        target = pymupdf.Rect(left, top, left + bounds.width, top + bounds.height)
+        target = target * page.derotation_matrix
+        rotation = page.rotation
+        # show_pdf_page needs the unrotated crop translation as well as the
+        # displayed orientation. Restore rotation even if insertion fails.
+        page.set_rotation(0)
+        try:
+            page.show_pdf_page(target, source, 0, clip=bounds,
+                               rotate=rotation, overlay=True)
+        finally:
+            page.set_rotation(rotation)
+        if len(self.templates) > 32:
+            old_source, _ = self.templates.popitem(last=False)[1]
+            old_source.close()
+
+
+def stamp_page(page, settings, renderer=None):
+    if renderer is None:
+        with StampRenderer() as renderer:
+            renderer.apply(page, settings)
+    else:
+        renderer.apply(page, settings)
 
 
 def validate_password(password, confirmation):
@@ -89,17 +138,19 @@ def crop_settings(pages, count, margins):
     return dict(indices=chosen_pages(pages, count), margins=values)
 
 
-def apply_page_edit(page, mode, settings):
-    if page.number not in settings["indices"]:
+def apply_page_edit(page, mode, settings, renderer=None, positions=None):
+    if positions is None:
+        positions = {number: rank for rank, number in enumerate(settings["indices"])}
+    if page.number not in positions:
         return
     if mode == "Watermark":
-        stamp_page(page, settings)
+        stamp_page(page, settings, renderer)
     elif mode == "Page numbers":
-        number = settings["start"] + settings["indices"].index(page.number)
+        number = settings["start"] + positions[page.number]
         total = settings["start"] + len(settings["indices"]) - 1
         text = str(number) if settings["style"] == "Number" else f"Page {number} of {total}"
         stamp_page(page, dict(text=text, size=settings["size"], opacity=100,
-                             position=settings["position"]))
+                             position=settings["position"]), renderer)
     elif mode == "Crop PDF":
         rect = page.rect
         left, top, right, bottom = settings["margins"]

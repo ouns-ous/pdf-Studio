@@ -138,9 +138,13 @@ def run():
             assert app.session.contract()["pages"] == 14
             # Stale preview completions cannot rebuild the home screen.
             app.refresh()
+            old_generation, old_future = app.generation, app.preview_future
             app.show_home()
-            pump(app, lambda: app.events.qsize() > 0)
-            app.update()
+            pump(app, lambda: old_future.done())
+            assert app.preview_cancel.is_set()
+            # Even a completion already queued before cancellation is ignored.
+            app.events.put(("preview", old_generation, [15], {}, [], None))
+            pump(app, lambda: app.events.empty())
             assert app.home_active
             # Real spawned processing, result retention, save retry and continuation.
             app.change("Merge PDF")

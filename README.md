@@ -1,6 +1,14 @@
-# PDF Studio 1.4
+# PDF Studio 1.4.1
 
 A local Windows PDF app with thirteen working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, Images to PDF, Protect, Unlock, Watermark, PDF to JPG, Page numbers and Crop PDF.
+
+## Changes in 1.4.1
+
+PDF previews now reuse up to 96 thumbnails in memory and cancel obsolete work when you leave a tool or request a newer preview. The cache checks file size, modification time and edit settings; passwords are still verified before preview access.
+
+Repeated watermarks share font resources. On the recorded 80-page synthetic test, output decreased from 9,673,304 to 182,333 bytes (98.12%). These measurements describe that fixture, not every PDF. Text placement now centers the visible text and correctly handles rotated, cropped pages. JPG export releases each raster before creating the next and stores already-compressed JPGs directly in ZIP.
+
+See [the measurements](docs/optimization-results.json) and [the review](docs/OPTIMIZATION-REVIEW.md).
 
 ## Install or run
 
@@ -42,11 +50,13 @@ python verify.py
 python verify_ui.py
 python verify_features.py
 python verify_extended.py
+python verify_optimizations.py
+python benchmark_watermark.py
 python -m PyInstaller --noconfirm PDF-Studio.spec
 & '.\.tools\inno\ISCC.exe' installer.iss
 ```
 
-The spec includes TkDnD data for native file drops and locates Conda native DLLs when building outside an activated shell. `verify_ui.py` uses generated PDFs to check navigation, file recovery, split contracts, order/rotation, undo, batch compression, saving/retry, continuation, cancellation and preservation of original bytes. Run the built executable with `--smoke-test` to verify Tk/TkDnD startup and spawned Merge, Protect, Unlock, Watermark, JPG, Page numbers and Crop jobs inside the packaged app. `verify_installer.ps1` can test a temporary per-user installation only when PDF Studio is not already installed.
+The spec includes TkDnD data for native file drops and locates Conda native DLLs when building outside an activated shell. `verify_ui.py` uses generated PDFs to check navigation, file recovery, split contracts, order/rotation, undo, batch compression, saving/retry, continuation, cancellation and preservation of original bytes. Run the built executable with `--smoke-test` to verify Tk/TkDnD startup and spawned Merge, Protect, Unlock, Watermark, JPG, Page numbers and Crop jobs inside the packaged app. The check exits with a nonzero status on failure and writes a diagnostic report to `%TEMP%\pdf-studio-smoke.json`; use `--smoke-report <path>` to choose another existing folder. `verify_installer.ps1` can test a temporary per-user installation only when PDF Studio is not already installed.
 
 The source is separated into `pdf_workflow.py` (sessions and output validation), `jobs.py` (isolated processing), `pdf_tools.py` (PDF primitives) and `app.py` (desktop UI).
 

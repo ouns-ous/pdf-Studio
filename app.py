@@ -5,6 +5,7 @@ import queue
 import shutil
 import sys
 import tempfile
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
@@ -17,7 +18,8 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 from pdf_workflow import Session, TOOLS, BATCH, PAGE_EDITS
 from jobs import run_job, image_page_size
 from pdf_tools import selection
-from pdf_features import authenticate, apply_page_edit
+from pdf_features import authenticate, apply_page_edit, StampRenderer
+from preview_cache import PreviewCache
 
 BG, WHITE, INK, MUTED, RED = "#f5f5fa", "#ffffff", "#33333b", "#70717e", "#ee2e2e"
 
@@ -44,7 +46,10 @@ class App(TkinterDnD.Tk):
         self.generation = 0
         self.images, self.cards, self.card_badges, self.preview_data = [], {}, {}, []
         self.events = queue.Queue()
-        self.preview_pool = ThreadPoolExecutor(max_workers=2)
+        self.preview_pool = ThreadPoolExecutor(max_workers=1)
+        self.preview_cancel = threading.Event()
+        self.preview_future = None
+        self.preview_cache = PreviewCache()
         self.temporary = tempfile.TemporaryDirectory(prefix="pdf-studio-")
         self.job = None
         self.poll_id = None
@@ -205,6 +210,7 @@ class App(TkinterDnD.Tk):
     def show_home(self, category="All"):
         if self.busy:
             return
+        self.stop_preview()
         self.generation += 1
         self.loading = False
         self.home_active = True
@@ -277,6 +283,7 @@ class App(TkinterDnD.Tk):
             mode, mode
         )
         self.home_active = False
+        self.stop_preview()
         self.generation += 1
         self.loading = False
         if self.session.result:
@@ -377,8 +384,14 @@ class App(TkinterDnD.Tk):
         self.session.offset = 0
         self.refresh()
 
+    def stop_preview(self):
+        self.preview_cancel.set()
+        if self.preview_future:
+            self.preview_future.cancel()
+
     def refresh(self):
         self.home_active = False
+        self.stop_preview()
         self.generation += 1
         self.loading = bool(self.session.files)
         s, generation = self.session, self.generation
@@ -388,13 +401,18 @@ class App(TkinterDnD.Tk):
             self.loading = False
             return
         request = deepcopy(s)
+        cancel = self.preview_cancel = threading.Event()
         self.edit_preview_settings = None
 
         def load():
             counts, errors, previews = [], {}, []
             settings = None
             for i, path in enumerate(request.files):
+                if cancel.is_set():
+                    return
                 try:
+                    source_stat = Path(path).stat()
+                    source_key = (path, source_stat.st_size, source_stat.st_mtime_ns)
                     if request.mode == "Images to PDF":
                         with Image.open(path) as source:
                             image = ImageOps.exif_transpose(source).convert("RGB")
@@ -455,21 +473,22 @@ class App(TkinterDnD.Tk):
                                     request.offset : request.offset + 12
                                 ]
                             )
-                            for page_index in indices:
-                                if (
-                                    request.mode in BATCH
-                                    and not request.offset <= i < request.offset + 12
-                                ):
-                                    continue
-                                if request.mode in PAGE_EDITS:
-                                    if settings and page_index in settings["indices"]:
-                                        apply_page_edit(doc[page_index], request.mode, settings)
-                                previews.append(
-                                    (
-                                        i if request.mode in BATCH else page_index,
-                                        self.thumbnail(doc[page_index]),
-                                    )
-                                )
+                            edit_key = (request.mode, json.dumps(settings, sort_keys=True)) if settings else None
+                            positions = {number: rank for rank, number in enumerate(settings["indices"])} if settings else {}
+                            with StampRenderer() as stamps:
+                                for page_index in indices:
+                                    if cancel.is_set():
+                                        return
+                                    if request.mode in BATCH and not request.offset <= i < request.offset + 12:
+                                        continue
+                                    cache_key = (*source_key, page_index, edit_key)
+                                    thumbnail = self.preview_cache.get(cache_key)
+                                    if thumbnail is None:
+                                        if settings:
+                                            apply_page_edit(doc[page_index], request.mode, settings, stamps, positions)
+                                        thumbnail = self.thumbnail(doc[page_index])
+                                        self.preview_cache.put(cache_key, thumbnail)
+                                    previews.append((i if request.mode in BATCH else page_index, thumbnail))
                 except Exception as error:
                     if len(counts) <= i:
                         counts.append(0)
@@ -479,9 +498,10 @@ class App(TkinterDnD.Tk):
                         else "Cannot read this file. Remove it or choose a valid "
                         + ("image." if request.mode == "Images to PDF" else "PDF.")
                     )
-            self.events.put(("preview", generation, counts, errors, previews, settings))
+            if not cancel.is_set():
+                self.events.put(("preview", generation, counts, errors, previews, settings))
 
-        self.preview_pool.submit(load)
+        self.preview_future = self.preview_pool.submit(load)
 
     @staticmethod
     def thumbnail(page):
@@ -1433,6 +1453,7 @@ class App(TkinterDnD.Tk):
         result = self.session.result
         if not result:
             return
+        self.stop_preview()
         self.generation += 1
         self.loading = False
         self.home_active = False
@@ -1617,20 +1638,23 @@ class App(TkinterDnD.Tk):
         if self.job and self.job.is_alive():
             self.job.terminate()
             self.job.join(timeout=3)
+        self.stop_preview()
         self.preview_pool.shutdown(wait=True, cancel_futures=True)
+        self.preview_cache.clear()
         self.temporary.cleanup()
         super().destroy()
 
 
 if __name__ == "__main__":
     mp.freeze_support()
-    app = App()
     if "--smoke-test" in sys.argv:
-        app.withdraw()
-        app.update()
-        app.destroy()
-        from selfcheck import check_worker
+        import argparse
+        from selfcheck import run_smoke_check
 
-        check_worker()
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--smoke-test", action="store_true")
+        parser.add_argument("--smoke-report", default=str(Path(tempfile.gettempdir()) / "pdf-studio-smoke.json"))
+        args = parser.parse_args()
+        raise SystemExit(run_smoke_check(App, args.smoke_report))
     else:
-        app.mainloop()
+        App().mainloop()
