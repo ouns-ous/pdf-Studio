@@ -214,6 +214,7 @@ class App(TkinterDnD.Tk):
         self.generation += 1
         self.loading = False
         self.home_active = True
+        self.home_category = category
         self.clear_body()
         for button in self.nav.values():
             button.config(fg=INK)
@@ -275,6 +276,9 @@ class App(TkinterDnD.Tk):
         self.status.set(
             f"{len(TOOLS)} working tools · Ctrl+O to import · Ctrl+Z to undo changes inside a tool."
         )
+
+    def back_to_tools(self):
+        self.show_home(self.home_category)
 
     def change(self, mode):
         if self.busy:
@@ -530,7 +534,10 @@ class App(TkinterDnD.Tk):
         for name, button in self.nav.items():
             button.config(fg=RED if name == self.mode else INK)
         if not s.files:
-            self.label(self.body, self.mode, 34, True, bg=BG).pack(pady=(55, 12))
+            toolbar = tk.Frame(self.body, bg=BG)
+            toolbar.pack(fill="x", padx=16, pady=12)
+            self.button(toolbar, "← Back", self.back_to_tools, small=True).pack(side="left")
+            self.label(self.body, self.mode, 34, True, bg=BG).pack(pady=(20, 12))
             self.label(self.body, TOOLS[self.mode][1], 17, bg=BG).pack(pady=10)
             select = self.button(
                 self.body,
@@ -560,7 +567,7 @@ class App(TkinterDnD.Tk):
         self.workspace.pack(side="left", fill="both", expand=True)
         toolbar = tk.Frame(self.workspace, bg=BG)
         toolbar.pack(fill="x", padx=16, pady=12)
-        self.button(toolbar, "← Tools", self.show_home, small=True).pack(side="left")
+        self.button(toolbar, "← Back", self.back_to_tools, small=True).pack(side="left")
         self.button(toolbar, "New task", self.new_task, small=True).pack(
             side="left", padx=5
         )
@@ -577,6 +584,10 @@ class App(TkinterDnD.Tk):
         controls = tk.Frame(self.workspace, bg=BG)
         controls.pack(fill="x", padx=20, pady=(0, 8))
         self.button(controls, "Undo", self.undo, small=True).pack(side="left")
+        if self.mode not in BATCH:
+            remove = self.button(controls, "× Remove PDF", lambda: self.remove_file(0), small=True)
+            remove.config(fg=RED, activeforeground=RED)
+            remove.pack(side="left", padx=6)
         if self.mode in ("Merge PDF", "Images to PDF"):
             self.button(
                 controls, "Sort A–Z", lambda: self.sort_files(False), small=True
@@ -1068,9 +1079,14 @@ class App(TkinterDnD.Tk):
                             lambda i=index, d=delta: self.move(i, d),
                             small=True,
                         ).pack(side="left")
-                self.button(
-                    bar, "Remove", lambda i=index: self.remove_file(i), small=True
-                ).pack(side="left")
+                # Give removal its own row so the full label stays visible.
+                remove = self.button(
+                    frame,
+                    "× Remove image" if self.mode == "Images to PDF" else "× Remove PDF",
+                    lambda i=index: self.remove_file(i), small=True,
+                )
+                remove.config(fg=RED, activeforeground=RED)
+                remove.pack(fill="x", pady=(5, 0))
             else:
                 bar = tk.Frame(frame, bg=WHITE)
                 bar.pack()
@@ -1304,7 +1320,14 @@ class App(TkinterDnD.Tk):
         self.refresh()
 
     def remove_file(self, index):
-        if self.loading or self.busy:
+        if self.busy or not 0 <= index < len(self.session.files):
+            return
+        if self.mode not in BATCH:
+            # Reset a mistaken input, including page state and passwords. This
+            # also cancels a pending preview and protects any unsaved result.
+            self.new_task()
+            return
+        if self.loading:
             return
         s = self.session
         s.checkpoint()
@@ -1458,8 +1481,11 @@ class App(TkinterDnD.Tk):
         self.loading = False
         self.home_active = False
         self.clear_body()
+        toolbar = tk.Frame(self.body, bg=BG)
+        toolbar.pack(fill="x", padx=16, pady=12)
+        self.button(toolbar, "← Back", self.refresh, small=True).pack(side="left")
         self.label(self.body, "Your result is ready", 30, True, bg=BG).pack(
-            pady=(35, 10)
+            pady=(10, 10)
         )
         self.label(
             self.body,
@@ -1482,9 +1508,6 @@ class App(TkinterDnD.Tk):
             "Show in folder",
             lambda: self.open_file(str(Path(result["saved"] or result["path"]).parent)),
         ).pack(side="left", padx=5)
-        self.button(actions, "← Change settings", self.refresh).pack(
-            side="left", padx=5
-        )
         self.button(actions, "New task", self.new_task).pack(side="left", padx=5)
         continuation = tk.Frame(self.body, bg=BG)
         continuation.pack(side="bottom", pady=20)

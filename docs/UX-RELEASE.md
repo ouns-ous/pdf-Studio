@@ -1,3 +1,13 @@
+# Back and input removal - version 1.4.2
+
+A consistent Back button now appears on the file-selection, workspace and result screens. A result returns to its settings while retaining the generated output. A tool returns to the previously selected home category and preserves its task.
+
+Every single-PDF workspace now has a visible Remove PDF button beside Undo. It clears a mistaken input, page state and passwords, cancels pending previews and returns to file selection. Unsaved results still offer save, discard or cancel. Batch cards put Remove PDF or Remove image on a separate row, keeping the full label visible and preserving Undo. These controls never delete source files from disk.
+
+`verify_navigation.py` checks all thirteen tools, task/category retention, individual batch removal and Undo, removal during preview loading, cancelled or failed result saving, minimum-size button visibility and unchanged source bytes. Existing user-journey and extended-tool regressions also pass.
+
+---
+
 # Performance update - version 1.4.1
 
 PDF previews reuse a bounded in-memory cache and cancel superseded work. Identical watermarks reuse font resources; visible text placement is corrected for rotated and previously cropped pages. Page-selection deduplication and numbering lookup avoid repeated list scans. JPG export releases one raster before creating the next and stores JPEGs directly in ZIP.

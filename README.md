@@ -1,6 +1,12 @@
-# PDF Studio 1.4.1
+# PDF Studio 1.4.2
 
 A local Windows PDF app with thirteen working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, Images to PDF, Protect, Unlock, Watermark, PDF to JPG, Page numbers and Crop PDF.
+
+## Changes in 1.4.2
+
+**Back** is visible before choosing a file, while editing, and on the result screen. From a result it returns to your settings; from a tool it returns to the last tool category while retaining the task.
+
+**Remove PDF** clears a mistaken input and returns to file selection in every single-PDF tool, even while its previews load. It resets that task's page state and passwords, and asks about an unsaved result before clearing it. Batch file cards have a separate, clearly labelled removal button; Undo restores a removed batch input. Original files stay on disk.
 
 ## Changes in 1.4.1
 
@@ -51,6 +57,7 @@ python verify_ui.py
 python verify_features.py
 python verify_extended.py
 python verify_optimizations.py
+python verify_navigation.py
 python benchmark_watermark.py
 python -m PyInstaller --noconfirm PDF-Studio.spec
 & '.\.tools\inno\ISCC.exe' installer.iss

@@ -1,5 +1,5 @@
 #define AppName "PDF Studio"
-#define AppVersion "1.4.1"
+#define AppVersion "1.4.2"
 
 [Setup]
 AppId={{17B925AE-7305-4919-9D65-F3B446E2EAAF}
