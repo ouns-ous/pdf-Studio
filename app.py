@@ -12,7 +12,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from io import BytesIO
-from PIL import Image, ImageOps, ImageTk
+from PIL import Image, ImageTk
 import pymupdf
 from tkinterdnd2 import TkinterDnD, DND_FILES
 from pdf_workflow import Session, TOOLS, BATCH, PAGE_EDITS
@@ -20,6 +20,8 @@ from jobs import run_job, image_page_size
 from pdf_tools import selection
 from pdf_features import authenticate, apply_page_edit, StampRenderer
 from preview_cache import PreviewCache
+from image_tools import page_image, validate_image_margin, ImageLayoutError
+from source_files import checked_version, source_errors, SourceFileError
 
 BG, WHITE, INK, MUTED, RED = "#f5f5fa", "#ffffff", "#33333b", "#70717e", "#ee2e2e"
 
@@ -357,7 +359,10 @@ class App(TkinterDnD.Tk):
         s = self.session
         if self.mode in BATCH:
             s.checkpoint()
-            s.files.extend(str(Path(path).resolve()) for path in files)
+            for path in files:
+                path = str(Path(path).resolve())
+                s.files.append(path)
+                s.source_versions.pop(path, None)
         else:
             if not self.resolve_unsaved(s):
                 return
@@ -410,23 +415,31 @@ class App(TkinterDnD.Tk):
 
         def load():
             counts, errors, previews = [], {}, []
+            versions = {}
             settings = None
+            if request.mode == "Images to PDF":
+                try:
+                    settings = request.image_settings()
+                except ValueError:
+                    pass
             for i, path in enumerate(request.files):
                 if cancel.is_set():
                     return
                 try:
-                    source_stat = Path(path).stat()
-                    source_key = (path, source_stat.st_size, source_stat.st_mtime_ns)
+                    version = checked_version(path, request.source_versions.get(path))
+                    source_key = (path, *version)
                     if request.mode == "Images to PDF":
                         with Image.open(path) as source:
-                            image = ImageOps.exif_transpose(source).convert("RGB")
+                            image = page_image(source)
                             counts.append(1)
+                            width, height = image_page_size(
+                                image, request.page_size, request.orientation
+                            )
+                            if settings:
+                                validate_image_margin(width, height, settings["margin"])
                             if request.offset <= i < request.offset + 12:
-                                width, height = image_page_size(
-                                    image, request.page_size, request.orientation
-                                )
                                 scale = min(160 / width, 190 / height)
-                                page_image = Image.new(
+                                preview_image = Image.new(
                                     "RGB",
                                     (
                                         max(1, int(width * scale)),
@@ -444,14 +457,14 @@ class App(TkinterDnD.Tk):
                                         max(1, int(height * scale - 2 * margin)),
                                     )
                                 )
-                                page_image.paste(
+                                preview_image.paste(
                                     image,
                                     (
-                                        (page_image.width - image.width) // 2,
-                                        (page_image.height - image.height) // 2,
+                                        (preview_image.width - image.width) // 2,
+                                        (preview_image.height - image.height) // 2,
                                     ),
                                 )
-                                previews.append((i, page_image))
+                                previews.append((i, preview_image))
                     else:
                         with pymupdf.open(path) as doc:
                             if not doc.is_pdf:
@@ -493,17 +506,19 @@ class App(TkinterDnD.Tk):
                                         thumbnail = self.thumbnail(doc[page_index])
                                         self.preview_cache.put(cache_key, thumbnail)
                                     previews.append((i if request.mode in BATCH else page_index, thumbnail))
+                    versions[path] = checked_version(path, version)
                 except Exception as error:
                     if len(counts) <= i:
                         counts.append(0)
                     errors[i] = (
-                        "Password protected. Open it with Unlock PDF first."
+                        str(error) if isinstance(error, (SourceFileError, ImageLayoutError))
+                        else "Password protected. Open it with Unlock PDF first."
                         if "Password protected" in str(error)
                         else "Cannot read this file. Remove it or choose a valid "
                         + ("image." if request.mode == "Images to PDF" else "PDF.")
                     )
             if not cancel.is_set():
-                self.events.put(("preview", generation, counts, errors, previews, settings))
+                self.events.put(("preview", generation, counts, errors, previews, settings, versions))
 
         self.preview_future = self.preview_pool.submit(load)
 
@@ -515,10 +530,13 @@ class App(TkinterDnD.Tk):
         )
         return Image.open(BytesIO(pix.tobytes("png"))).copy()
 
-    def receive_previews(self, counts, errors, previews, edit_settings=None):
+    def receive_previews(self, counts, errors, previews, edit_settings=None, versions=None):
         self.edit_preview_settings = edit_settings
         s = self.session
         s.counts, s.errors, s.loaded = counts, errors, True
+        s.source_versions.update(versions or {})
+        if errors and self.mode not in BATCH:
+            s.offset = 0
         self.loading = False
         if self.mode not in BATCH and not s.order and s.page_count:
             s.order = list(range(s.page_count))
@@ -982,7 +1000,8 @@ class App(TkinterDnD.Tk):
             if self.loading:
                 raise ValueError("Checking files and loading previews…")
             contract = self.session.contract()
-            if self.mode in PAGE_EDITS and self.session.page_edit() != self.edit_preview_settings:
+            settings = self.session.image_settings() if self.mode == "Images to PDF" else self.session.page_edit()
+            if self.mode in PAGE_EDITS | {"Images to PDF"} and settings != self.edit_preview_settings:
                 raise ValueError("Click Update preview to review your changes.")
             message = (
                 f"Output: {contract['count']} {contract['kind']}, {contract['pages']} pages"
@@ -1065,7 +1084,7 @@ class App(TkinterDnD.Tk):
                 if not error:
                     self.label(
                         frame,
-                        f"{s.counts[index]} page(s) · {size_text(Path(s.files[index]).stat().st_size)}",
+                        f"{s.counts[index]} page(s) · {size_text(s.source_versions[s.files[index]][0])}",
                         9,
                         color=MUTED,
                     ).pack()
@@ -1079,6 +1098,8 @@ class App(TkinterDnD.Tk):
                             lambda i=index, d=delta: self.move(i, d),
                             small=True,
                         ).pack(side="left")
+                if self.mode in BATCH:
+                    self.button(bar, "Replace", lambda i=index: self.replace_file(i), small=True).pack(side="left")
                 # Give removal its own row so the full label stays visible.
                 remove = self.button(
                     frame,
@@ -1319,6 +1340,23 @@ class App(TkinterDnD.Tk):
         self.session.files.sort(key=lambda p: Path(p).name.casefold(), reverse=reverse)
         self.refresh()
 
+    def replace_file(self, index):
+        if self.busy or self.loading or self.mode not in BATCH or not 0 <= index < len(self.session.files):
+            return
+        images = self.mode == "Images to PDF"
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Replace this image" if images else "Replace this PDF",
+            filetypes=[("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff")] if images else [("PDF files", "*.pdf")],
+        )
+        if not path:
+            return
+        path = str(Path(path).resolve())
+        self.session.checkpoint()
+        self.session.files[index] = path
+        self.session.source_versions.pop(path, None)
+        self.refresh()
+
     def remove_file(self, index):
         if self.busy or not 0 <= index < len(self.session.files):
             return
@@ -1348,6 +1386,8 @@ class App(TkinterDnD.Tk):
         self.refresh()
 
     def open_preview(self, index):
+        if not self.check_inputs():
+            return
         try:
             with pymupdf.open(self.session.files[0]) as doc:
                 authenticate(doc, self.session.input_password)
@@ -1372,11 +1412,28 @@ class App(TkinterDnD.Tk):
         except Exception as error:
             messagebox.showerror("Preview unavailable", str(error), parent=self)
 
+    def check_inputs(self):
+        errors = source_errors(self.session.files, self.session.source_versions)
+        if not errors:
+            return True
+        self.session.errors.update(errors)
+        self.session.offset = (min(errors) // 12 * 12) if self.mode in BATCH else 0
+        self.render_work()
+        self.paint_gallery()
+        self.update_action()
+        self.status.set("Some inputs are unavailable or changed. Review the marked files.")
+        return False
+
     def run(self):
         if self.busy or self.loading:
             return
+        if not self.check_inputs():
+            return
         try:
             request = self.session.request()
+            settings = self.session.image_settings() if self.mode == "Images to PDF" else self.session.page_edit()
+            if self.mode in PAGE_EDITS | {"Images to PDF"} and settings != self.edit_preview_settings:
+                raise ValueError("Update preview before processing.")
         except ValueError:
             self.update_action()
             return

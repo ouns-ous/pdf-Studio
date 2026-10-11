@@ -7,11 +7,13 @@ import zipfile
 from pathlib import Path
 from io import BytesIO
 import pymupdf
-from PIL import Image, ImageOps
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pdf_tools import process
 from pdf_features import authenticate, apply_page_edit, validate_password, StampRenderer
 from pdf_workflow import PAGE_EDITS
+from image_tools import page_image, validate_image_margin
+from source_files import checked_version
 
 
 def image_page_size(image, size, orientation):
@@ -40,6 +42,8 @@ def export_pages(source, output, indices, rotations=None):
 def execute(request, folder, progress=lambda text: None):
     folder = Path(folder)
     mode, files = request["mode"], request["files"]
+    # Check the reviewed inputs again in the worker, and before publishing a result.
+    versions = {path: checked_version(path, request.get("source_versions", {}).get(path)) for path in files}
     results, stats = [], []
     if mode == "Compress PDF":
         for index, source in enumerate(files, 1):
@@ -74,15 +78,12 @@ def execute(request, folder, progress=lambda text: None):
             for index, filename in enumerate(files, 1):
                 progress(f"Converting image {index} of {len(files)}…")
                 with Image.open(filename) as source:
-                    image = ImageOps.exif_transpose(source).convert("RGB")
+                    image = page_image(source)
                     width, height = image_page_size(
                         image, request["page_size"], request["orientation"]
                     )
                     margin = request["margin"]
-                    if width <= margin * 2 or height <= margin * 2:
-                        raise ValueError(
-                            "Margins are too large for the original image size. Choose A4 or smaller margins."
-                        )
+                    validate_image_margin(width, height, margin)
                     data = BytesIO()
                     image.save(data, format="PNG")
                     page = doc.new_page(width=width, height=height)
@@ -143,6 +144,8 @@ def execute(request, folder, progress=lambda text: None):
                 archive.write(item, item.name)
     else:
         output = results[0]
+    for path, version in versions.items():
+        checked_version(path, version)
     return {
         "path": str(output),
         "files": [str(item) for item in results],

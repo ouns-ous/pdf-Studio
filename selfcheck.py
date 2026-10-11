@@ -7,6 +7,7 @@ from pathlib import Path
 import pymupdf
 from jobs import run_job
 from pdf_workflow import Session
+from source_files import checked_version
 
 
 def check_worker():
@@ -17,7 +18,8 @@ def check_worker():
             page.insert_text((40, 60), "PDF Studio smoke check")
             doc.save(source)
         session = Session(
-            "Merge PDF", files=[str(source), str(source)], counts=[1, 1], loaded=True
+            "Merge PDF", files=[str(source), str(source)], counts=[1, 1], loaded=True,
+            source_versions={str(source): checked_version(source)}
         )
         worker = mp.get_context("spawn").Process(
             target=run_job, args=(session.request(), folder)
@@ -37,12 +39,17 @@ def check_worker():
             assert len(doc) == 2
             assert all("PDF Studio smoke check" in page.get_text() for page in doc)
 
-        for mode in ("Protect PDF", "Unlock PDF", "Watermark", "PDF to JPG", "Page numbers", "Crop PDF"):
+        from PIL import Image
+        transparent = Path(folder) / "transparent.png"
+        Image.new("RGBA", (100, 100), (0, 0, 0, 0)).save(transparent)
+        for mode in ("Protect PDF", "Unlock PDF", "Watermark", "PDF to JPG", "Page numbers", "Crop PDF", "Images to PDF"):
             output_folder = Path(folder) / mode.replace(" ", "-")
             output_folder.mkdir()
-            item = Session(mode, files=[protected if mode == "Unlock PDF" else str(source)],
+            input_file = str(transparent) if mode == "Images to PDF" else protected if mode == "Unlock PDF" else str(source)
+            item = Session(mode, files=[input_file],
                            counts=[1], loaded=True, password="smoke-test-pass", confirmation="smoke-test-pass",
-                           input_password="smoke-test-pass", watermark_text="DRAFT سري")
+                           input_password="smoke-test-pass", watermark_text="DRAFT سري",
+                           source_versions={input_file: checked_version(input_file)})
             worker = mp.get_context("spawn").Process(target=run_job, args=(item.request(), str(output_folder)))
             worker.start()
             worker.join(40)
@@ -62,6 +69,9 @@ def check_worker():
                     assert len(doc) == 1
                     if mode == "Watermark":
                         assert "DRAFT" in doc[0].get_text()
+                    if mode == "Images to PDF":
+                        pix = doc[0].get_pixmap()
+                        assert pix.pixel(pix.width // 2, pix.height // 2) == (255, 255, 255)
             else:
                 from PIL import Image
                 with Image.open(result) as image:

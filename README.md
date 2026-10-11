@@ -1,6 +1,14 @@
-# PDF Studio 1.4.2
+# PDF Studio 1.4.3
 
 A local Windows PDF app with thirteen working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, Images to PDF, Protect, Unlock, Watermark, PDF to JPG, Page numbers and Crop PDF.
+
+## Changes in 1.4.3
+
+Missing or moved inputs no longer interrupt gallery updates. Inputs are checked against the version reviewed in the preview before processing and again in the worker. A changed file appears as an error: use **Replace** to select it again and review its new contents before applying page edits. Valid files, settings and existing results remain available.
+
+Batch tools now have **Replace** on each file card. Correct a mistaken input without changing its position; **Undo** restores the previous selection. Cancelling the file picker leaves the task unchanged.
+
+Images with transparency now use a white background consistently in previews and exported PDFs, including partially transparent and palette-based PNGs. Changing image margins requires **Update preview** before processing, and margins that leave no space on an Original-size page are flagged in the workspace. Invalid page-range text now shows a readable example.
 
 ## Changes in 1.4.2
 
@@ -58,6 +66,7 @@ python verify_features.py
 python verify_extended.py
 python verify_optimizations.py
 python verify_navigation.py
+python verify_stability.py
 python benchmark_watermark.py
 python -m PyInstaller --noconfirm PDF-Studio.spec
 & '.\.tools\inno\ISCC.exe' installer.iss
@@ -66,5 +75,7 @@ python -m PyInstaller --noconfirm PDF-Studio.spec
 The spec includes TkDnD data for native file drops and locates Conda native DLLs when building outside an activated shell. `verify_ui.py` uses generated PDFs to check navigation, file recovery, split contracts, order/rotation, undo, batch compression, saving/retry, continuation, cancellation and preservation of original bytes. Run the built executable with `--smoke-test` to verify Tk/TkDnD startup and spawned Merge, Protect, Unlock, Watermark, JPG, Page numbers and Crop jobs inside the packaged app. The check exits with a nonzero status on failure and writes a diagnostic report to `%TEMP%\pdf-studio-smoke.json`; use `--smoke-report <path>` to choose another existing folder. `verify_installer.ps1` can test a temporary per-user installation only when PDF Studio is not already installed.
 
 The source is separated into `pdf_workflow.py` (sessions and output validation), `jobs.py` (isolated processing), `pdf_tools.py` (PDF primitives) and `app.py` (desktop UI).
+
+`verify_stability.py` covers disappearing and changed inputs, changes during processing, transparent image rendering, preview/settings consistency, invalid margins, page-range errors and atomic save failure/retry. Input version checks use size, modification time and file identity; they are change detection, not a file lock or a content hash.
 
 The executable is unsigned. See [the UX audit](docs/UX-AUDIT.md) and [the implementation notes](docs/UX-RELEASE.md).

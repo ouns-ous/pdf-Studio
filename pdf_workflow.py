@@ -68,6 +68,7 @@ class Session:
     files: list = field(default_factory=list)
     counts: list = field(default_factory=list)
     errors: dict = field(default_factory=dict)
+    source_versions: dict = field(default_factory=dict)
     order: list = field(default_factory=list)
     removed: set = field(default_factory=set)
     rotations: dict = field(default_factory=dict)
@@ -110,6 +111,17 @@ class Session:
                                   self.page_count, self.watermark_size,
                                   self.watermark_opacity, self.watermark_position)
 
+    def image_settings(self):
+        try:
+            margin = int(self.margin)
+            if not 0 <= margin <= 100:
+                raise ValueError()
+        except ValueError:
+            raise ValueError("Margins must be between 0 and 100 points.") from None
+        if self.page_size not in ("A4", "Letter", "Original") or self.orientation not in ("Portrait", "Landscape"):
+            raise ValueError("Choose a page size and orientation.")
+        return {"page_size": self.page_size, "orientation": self.orientation, "margin": margin}
+
     def page_edit(self):
         if self.mode == "Watermark":
             return self.watermark()
@@ -126,7 +138,7 @@ class Session:
         return self.counts[0] if self.counts else 0
 
     def checkpoint(self):
-        fields = ("files", "order", "removed", "rotations", "selected")
+        fields = ("files", "source_versions", "order", "removed", "rotations", "selected")
         self.history.append({key: deepcopy(getattr(self, key)) for key in fields})
         self.history = self.history[-30:]
 
@@ -175,7 +187,7 @@ class Session:
         if not self.loaded:
             raise ValueError("Checking files and loading previews…")
         if self.errors:
-            raise ValueError("Remove or replace the files marked with an error.")
+            raise ValueError("Review the files marked with an error before continuing.")
         if self.mode == "Merge PDF" and len(self.files) < 2:
             raise ValueError("Add at least one more PDF to merge your files.")
         count, pages, warning = 1, sum(self.counts), ""
@@ -217,12 +229,7 @@ class Session:
         elif self.mode == "Compress PDF":
             count = len(self.files)
         elif self.mode == "Images to PDF":
-            try:
-                margin = int(self.margin)
-                if not 0 <= margin <= 100:
-                    raise ValueError()
-            except ValueError:
-                raise ValueError("Margins must be between 0 and 100 points.") from None
+            self.image_settings()
         return {
             "count": count,
             "pages": pages,
@@ -236,6 +243,7 @@ class Session:
         return {
             "mode": self.mode,
             "files": list(self.files),
+            "source_versions": {path: self.source_versions[path] for path in self.files if path in self.source_versions},
             "contract": contract,
             "groups": self.groups() if self.mode == "Split PDF" else [],
             "combine": self.combine,

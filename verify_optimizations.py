@@ -80,6 +80,10 @@ def run():
                 os.utime(source, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns + 1_000_000))
                 app.refresh()
                 pump(app)
+                assert app.session.errors and str(app.action["state"]) == "disabled"
+                # A changed source must be selected again before reusing page settings.
+                app.import_files([str(source)])
+                pump(app)
                 assert render.call_count == 25
                 assert dict(app.preview_data)[0].tobytes() != first
                 app.change("Watermark")

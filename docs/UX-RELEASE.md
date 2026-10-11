@@ -1,3 +1,18 @@
+# Stability and batch replacement - version 1.4.3
+
+The stability audit reproduced three gaps that the existing six test suites did not cover: repainting a batch card after its source disappeared raised `FileNotFoundError`; transparent black PNG pixels became black in exported PDFs; and image margins could change without refreshing the preview before processing.
+
+- Gallery labels use the metadata already read by the preview worker, so a disappearing source cannot interrupt the UI polling loop. Missing, inaccessible or externally changed inputs receive actionable card errors. File size, modification time and file identity are checked during previews, before processing and at worker completion. Changed inputs must be selected again before old page settings can be applied. These checks are not a file lock or a content hash.
+- **Replace** on Merge, Compress and Images to PDF cards preserves the file's position. Cancelling the picker leaves the task untouched; Undo restores the old selection and its reviewed file version. Original files are never deleted by these controls.
+- Transparent and partly transparent images are composited onto white using the same preparation for previews and both PDF converters. RGBA, grayscale alpha and palette transparency are covered.
+- Image settings must match the current preview before processing. Original-size margins that leave no room for the image are reported before starting a job, and can be corrected in the same task. Malformed page ranges display `Use page numbers like 1,3-5.` instead of a Python conversion error.
+
+`verify_stability.py` exercises these cases, file replacement/cancellation/Undo in all three batch tools, a source changing during processing, worker error reporting, and a partial save failure that preserves an existing destination and allows retry. Existing regression suites cover the thirteen tools, result continuation, cancellation, encryption, Unicode watermarks, cropping, numbering, page order and rotations. The packaged smoke check now includes transparent-image conversion and reviewed source metadata.
+
+Validation on 2026-10-11: all seven regression suites passed. After adding batch replacement, the stability, navigation, user-journey and optimization suites passed again. The final Windows executable matches all nine application source modules and passed its startup/eight-worker smoke check. The 1.4.3 installer compiled successfully; installation/uninstallation was not run over the existing installation. These are automated checks on synthetic documents, not a guarantee for every PDF or a manual accessibility audit.
+
+---
+
 # Back and input removal - version 1.4.2
 
 A consistent Back button now appears on the file-selection, workspace and result screens. A result returns to its settings while retaining the generated output. A tool returns to the previously selected home category and preserves its task.

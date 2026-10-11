@@ -1,7 +1,8 @@
 from pathlib import Path
 from io import BytesIO
 from pypdf import PdfReader, PdfWriter
-from PIL import Image, ImageOps
+from PIL import Image
+from image_tools import page_image
 import zipfile
 import tempfile
 import os
@@ -15,8 +16,11 @@ def selection(text, count):
         bounds = part.strip().split("-")
         if len(bounds) > 2:
             raise ValueError("Use page numbers like 1,3-5.")
-        first = int(bounds[0])
-        last = int(bounds[-1])
+        try:
+            first = int(bounds[0])
+            last = int(bounds[-1])
+        except ValueError:
+            raise ValueError("Use page numbers like 1,3-5.") from None
         if first < 1 or last < first or last > count:
             raise ValueError(f"Pages must be between 1 and {count}.")
         for number in range(first - 1, last):
@@ -71,7 +75,7 @@ def process(
     if mode == "Images to PDF":
         for filename in files:
             with Image.open(filename) as source:
-                img = ImageOps.exif_transpose(source).convert("RGB")
+                img = page_image(source)
                 data = BytesIO()
                 img.save(data, format="PDF", resolution=150)
                 data.seek(0)
