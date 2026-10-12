@@ -56,10 +56,12 @@ TOOLS.update({
     "Unlock PDF": ("PDF Security", "Remove PDF encryption using its password.", "#497dae", "◇"),
     "Watermark": ("Edit PDF", "Preview a text watermark on the pages you choose.", "#ab6796", "T"),
     "PDF to JPG": ("Convert PDF", "Export PDF pages as JPG images at your chosen resolution.", "#d4c52c", "JPG"),
+    "PDF to PNG": ("Convert PDF", "Export crisp PNG pages, with an optional transparent background.", "#d4c52c", "PNG"),
     "Page numbers": ("Edit PDF", "Add page numbers with your choice of range and starting number.", "#ab6796", "1 2"),
     "Crop PDF": ("Edit PDF", "Trim visible page margins and preview the result.", "#ab6796", "⊡"),
 })
 PAGE_EDITS = {"Watermark", "Page numbers", "Crop PDF"}
+IMAGE_EXPORTS = {"PDF to JPG": "JPG", "PDF to PNG": "PNG"}
 
 
 @dataclass
@@ -97,6 +99,8 @@ class Session:
     target_pages: str = ""
     jpg_dpi: str = "150"
     jpg_quality: str = "85"
+    png_dpi: str = "150"
+    png_transparent: bool = False
     number_start: str = "1"
     number_size: str = "12"
     number_position: str = "Bottom"
@@ -121,6 +125,23 @@ class Session:
         if self.page_size not in ("A4", "Letter", "Original") or self.orientation not in ("Portrait", "Landscape"):
             raise ValueError("Choose a page size and orientation.")
         return {"page_size": self.page_size, "orientation": self.orientation, "margin": margin}
+
+    def export_settings(self):
+        kind = IMAGE_EXPORTS[self.mode]
+        dpi = self.png_dpi if kind == "PNG" else self.jpg_dpi
+        if dpi not in ("72", "150", "300"):
+            raise ValueError("Choose an image resolution of 72, 150 or 300 DPI.")
+        if kind == "JPG" and self.jpg_quality not in ("60", "85", "95"):
+            raise ValueError("Choose a JPG quality of 60, 85 or 95%.")
+        if kind == "PNG" and not isinstance(self.png_transparent, bool):
+            raise ValueError("Choose a white or transparent PNG background.")
+        return {
+            "indices": chosen_pages(self.target_pages, self.page_count),
+            "dpi": int(dpi),
+            "quality": int(self.jpg_quality) if kind == "JPG" else None,
+            "transparent": self.png_transparent if kind == "PNG" else False,
+            "extension": "." + kind.lower(),
+        }
 
     def page_edit(self):
         if self.mode == "Watermark":
@@ -202,11 +223,14 @@ class Session:
         elif self.mode in PAGE_EDITS:
             settings = self.page_edit()
             warning = f"Apply changes to {len(settings['indices'])} page(s)."
-        elif self.mode == "PDF to JPG":
-            count = pages = len(chosen_pages(self.target_pages, self.page_count))
-            if self.jpg_dpi not in ("72", "150", "300") or self.jpg_quality not in ("60", "85", "95"):
-                raise ValueError("Choose the image resolution and quality.")
-            warning = f"{self.jpg_dpi} DPI · JPG quality {self.jpg_quality}%."
+        elif self.mode in IMAGE_EXPORTS:
+            settings = self.export_settings()
+            count = pages = len(settings["indices"])
+            warning = (
+                f"{settings['dpi']} DPI · JPG quality {settings['quality']}%."
+                if self.mode == "PDF to JPG"
+                else f"{settings['dpi']} DPI · Lossless PNG · {'Transparent' if settings['transparent'] else 'White'} background."
+            )
         if self.mode == "Split PDF":
             groups = self.groups()
             pages = sum(map(len, groups))
@@ -233,8 +257,8 @@ class Session:
         return {
             "count": count,
             "pages": pages,
-            "extension": ".zip" if count > 1 else (".jpg" if self.mode == "PDF to JPG" else ".pdf"),
-            "kind": "JPG image(s)" if self.mode == "PDF to JPG" else "PDF file(s)",
+            "extension": ".zip" if count > 1 else ("." + IMAGE_EXPORTS[self.mode].lower() if self.mode in IMAGE_EXPORTS else ".pdf"),
+            "kind": IMAGE_EXPORTS[self.mode] + " image(s)" if self.mode in IMAGE_EXPORTS else "PDF file(s)",
             "warning": warning,
         }
 
@@ -258,7 +282,5 @@ class Session:
             "input_password": self.input_password if self.mode == "Unlock PDF" else "",
             "watermark": self.watermark() if self.mode == "Watermark" else None,
             "page_edit": self.page_edit(),
-            "jpg_pages": chosen_pages(self.target_pages, self.page_count) if self.mode == "PDF to JPG" else [],
-            "jpg_dpi": int(self.jpg_dpi),
-            "jpg_quality": int(self.jpg_quality),
+            "image_export": self.export_settings() if self.mode in IMAGE_EXPORTS else None,
         }

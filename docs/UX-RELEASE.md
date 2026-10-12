@@ -1,3 +1,17 @@
+# PDF to PNG - version 1.5.0
+
+PDF to PNG is the fourteenth working tool, available on the Convert PDF home category and menu. It exports all pages or selected ranges at 72, 150 or 300 DPI. White is the default background; optional transparency preserves unpainted areas while keeping explicit white page graphics opaque. Existing page crops and rotations are respected. PNG compression is lossless, though raster resolution still depends on the selected DPI.
+
+The tool follows the same choose → configure → process → save/continue journey. Multiple pages are deduplicated and saved in document order inside a ZIP; one page saves directly as PNG. Result counts and file dialogs identify PNG correctly. Results can continue into Images to PDF, where transparency is composited onto white PDF pages. Back, Remove PDF, input-change detection and retained task settings remain available.
+
+JPG and PNG share the isolated rendering worker, with separate resolution settings per tool. The worker releases each raster before allocating the next, rejects renders larger than 40 million pixels and stores already-compressed image files directly in ZIP.
+
+`verify_png.py` covers all supported DPIs and four rotations on cropped pages, RGB pixel equality and alpha/color fidelity (allowing one color level of rounding when converting premultiplied alpha), transparent space versus explicit white graphics, single/ZIP output, page order/deduplication, invalid settings, oversized pages and Unicode filenames. UI tests exercise spawned exports, result/save labels, continuation, retained options, Back, Remove PDF and the primary action at the minimum window size. The packaged smoke check includes a transparent PNG export.
+
+Validation completed on 2026-10-12: all eight regression suites passed. The Windows executable matches all nine application source modules and passed startup plus nine packaged worker checks. The 1.5.0 installer compiled successfully. Installation/uninstallation was not run over the existing installation; the automated checks use synthetic documents.
+
+---
+
 # Stability and batch replacement - version 1.4.3
 
 The stability audit reproduced three gaps that the existing six test suites did not cover: repainting a batch card after its source disappeared raised `FileNotFoundError`; transparent black PNG pixels became black in exported PDFs; and image margins could change without refreshing the preview before processing.

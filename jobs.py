@@ -11,7 +11,7 @@ from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pdf_tools import process
 from pdf_features import authenticate, apply_page_edit, validate_password, StampRenderer
-from pdf_workflow import PAGE_EDITS
+from pdf_workflow import PAGE_EDITS, IMAGE_EXPORTS
 from image_tools import page_image, validate_image_margin
 from source_files import checked_version
 
@@ -94,18 +94,23 @@ def execute(request, folder, progress=lambda text: None):
                     )
             doc.save(output, deflate=True)
         results.append(output)
-    elif mode == "PDF to JPG":
+    elif mode in IMAGE_EXPORTS:
+        settings = request["image_export"]
         with pymupdf.open(files[0]) as doc:
             authenticate(doc, "")
-            for index in request["jpg_pages"]:
+            for index in settings["indices"]:
                 progress(f"Exporting page {index + 1} of {len(doc)}…")
                 page = doc[index]
-                scale = request["jpg_dpi"] / 72
+                scale = settings["dpi"] / 72
                 if page.rect.width * page.rect.height * scale * scale > 40_000_000:
                     raise ValueError(f"Page {index + 1} is too large at this resolution. Choose a lower DPI.")
-                output = folder / f"{Path(files[0]).stem}-page-{index+1:04d}.jpg"
-                pixmap = page.get_pixmap(dpi=request["jpg_dpi"], colorspace=pymupdf.csRGB, alpha=False)
-                pixmap.save(output, jpg_quality=request["jpg_quality"])
+                output = folder / f"{Path(files[0]).stem}-page-{index+1:04d}{settings['extension']}"
+                pixmap = page.get_pixmap(dpi=settings["dpi"], colorspace=pymupdf.csRGB,
+                                        alpha=settings["transparent"])
+                if mode == "PDF to JPG":
+                    pixmap.save(output, jpg_quality=settings["quality"])
+                else:
+                    pixmap.save(output)
                 del pixmap  # Release this page before allocating the next raster.
                 results.append(output)
     elif mode in {"Protect PDF", "Unlock PDF"} | PAGE_EDITS:
@@ -139,7 +144,7 @@ def execute(request, folder, progress=lambda text: None):
         raise ValueError("Choose a supported PDF tool.")
     if len(results) > 1:
         output = folder / (mode.lower().replace(" ", "-") + ".zip")
-        with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED if mode == "PDF to JPG" else zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED if mode in IMAGE_EXPORTS else zipfile.ZIP_DEFLATED) as archive:
             for item in results:
                 archive.write(item, item.name)
     else:
@@ -150,7 +155,7 @@ def execute(request, folder, progress=lambda text: None):
         "path": str(output),
         "files": [str(item) for item in results],
         "pdfs": [str(item) for item in results if item.suffix == ".pdf"],
-        "images": [str(item) for item in results if item.suffix == ".jpg"],
+        "images": [str(item) for item in results if item.suffix in (".jpg", ".png")],
         "stats": stats,
         "pages": request["contract"]["pages"],
         "saved": "",

@@ -42,13 +42,14 @@ def check_worker():
         from PIL import Image
         transparent = Path(folder) / "transparent.png"
         Image.new("RGBA", (100, 100), (0, 0, 0, 0)).save(transparent)
-        for mode in ("Protect PDF", "Unlock PDF", "Watermark", "PDF to JPG", "Page numbers", "Crop PDF", "Images to PDF"):
+        for mode in ("Protect PDF", "Unlock PDF", "Watermark", "PDF to JPG", "PDF to PNG", "Page numbers", "Crop PDF", "Images to PDF"):
             output_folder = Path(folder) / mode.replace(" ", "-")
             output_folder.mkdir()
             input_file = str(transparent) if mode == "Images to PDF" else protected if mode == "Unlock PDF" else str(source)
             item = Session(mode, files=[input_file],
                            counts=[1], loaded=True, password="smoke-test-pass", confirmation="smoke-test-pass",
                            input_password="smoke-test-pass", watermark_text="DRAFT سري",
+                           png_dpi="72", png_transparent=True,
                            source_versions={input_file: checked_version(input_file)})
             worker = mp.get_context("spawn").Process(target=run_job, args=(item.request(), str(output_folder)))
             worker.start()
@@ -62,7 +63,7 @@ def check_worker():
             result = state["result"]["path"]
             if mode == "Protect PDF":
                 protected = result
-            if mode != "PDF to JPG":
+            if mode not in ("PDF to JPG", "PDF to PNG"):
                 with pymupdf.open(result) as doc:
                     if mode == "Protect PDF":
                         assert doc.needs_pass and doc.authenticate("smoke-test-pass")
@@ -75,7 +76,9 @@ def check_worker():
             else:
                 from PIL import Image
                 with Image.open(result) as image:
-                    assert image.format == "JPEG" and image.width > 0
+                    assert image.format == ("PNG" if mode == "PDF to PNG" else "JPEG") and image.width > 0
+                    if mode == "PDF to PNG":
+                        assert image.mode == "RGBA" and image.getpixel((0, 0))[3] == 0
 
 
 def run_smoke_check(app_factory, report_path):

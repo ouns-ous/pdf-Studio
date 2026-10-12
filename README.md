@@ -1,6 +1,12 @@
-# PDF Studio 1.4.3
+# PDF Studio 1.5.0
 
-A local Windows PDF app with thirteen working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, Images to PDF, Protect, Unlock, Watermark, PDF to JPG, Page numbers and Crop PDF.
+A local Windows PDF app with fourteen working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, Images to PDF, Protect, Unlock, Watermark, PDF to JPG, PDF to PNG, Page numbers and Crop PDF.
+
+## Changes in 1.5.0
+
+**PDF to PNG** joins the Convert PDF tools. Export all pages or a selected range at 72, 150 or 300 DPI, with a white or transparent background. PNG uses lossless compression, making it useful for text and graphics. Transparency preserves unpainted areas; it does not erase white graphics or scanned page backgrounds.
+
+One selected page saves as PNG; multiple pages save in a ZIP, in document order. Result labels and the save dialog show the correct format, and **Continue → Images to PDF** accepts the generated PNGs. Back, Remove PDF, task retention and the checks for changed input files apply to the new tool as well.
 
 ## Changes in 1.4.3
 
@@ -48,6 +54,7 @@ The result screen lets you save, open, reveal the folder, change settings, or co
 - **Watermark:** add a Unicode text watermark to all pages or a page range, with Top/Center/Bottom placement, font size and opacity. Update preview after changing settings before processing. Long text shrinks to fit; image watermarks are not included in this release.
 
 - **PDF to JPG:** export all pages or a range in document order at 72, 150 or 300 DPI and 60%, 85% or 95% JPG quality. One page saves as JPG; multiple pages save as ZIP. Continue directly in Images to PDF. Very large pages require a lower DPI.
+- **PDF to PNG:** export pages at 72, 150 or 300 DPI without JPG compression, with an optional transparent background. One page saves as PNG; multiple pages save as ZIP. Existing crop and rotation are respected. Continue directly in Images to PDF, which places images on white pages. Very large pages require a lower DPI.
 - **Page numbers:** select pages, starting number, top/bottom placement, font size and plain or Page n of total format. Numbering follows document order; the total is the last printed number. Update preview before processing.
 - **Crop PDF:** choose pages and left/top/right/bottom margins as percentages of the displayed page. Update preview to see the resulting dimensions. Cropping hides content outside the crop box; it is not permanent redaction.
 
@@ -67,15 +74,18 @@ python verify_extended.py
 python verify_optimizations.py
 python verify_navigation.py
 python verify_stability.py
+python verify_png.py
 python benchmark_watermark.py
 python -m PyInstaller --noconfirm PDF-Studio.spec
 & '.\.tools\inno\ISCC.exe' installer.iss
 ```
 
-The spec includes TkDnD data for native file drops and locates Conda native DLLs when building outside an activated shell. `verify_ui.py` uses generated PDFs to check navigation, file recovery, split contracts, order/rotation, undo, batch compression, saving/retry, continuation, cancellation and preservation of original bytes. Run the built executable with `--smoke-test` to verify Tk/TkDnD startup and spawned Merge, Protect, Unlock, Watermark, JPG, Page numbers and Crop jobs inside the packaged app. The check exits with a nonzero status on failure and writes a diagnostic report to `%TEMP%\pdf-studio-smoke.json`; use `--smoke-report <path>` to choose another existing folder. `verify_installer.ps1` can test a temporary per-user installation only when PDF Studio is not already installed.
+The spec includes TkDnD data for native file drops and locates Conda native DLLs when building outside an activated shell. `verify_ui.py` uses generated PDFs to check navigation, file recovery, split contracts, order/rotation, undo, batch compression, saving/retry, continuation, cancellation and preservation of original bytes. Run the built executable with `--smoke-test` to verify Tk/TkDnD startup and spawned Merge, Protect, Unlock, Watermark, JPG, PNG, Page numbers, Crop and Images to PDF jobs inside the packaged app. The check exits with a nonzero status on failure and writes a diagnostic report to `%TEMP%\pdf-studio-smoke.json`; use `--smoke-report <path>` to choose another existing folder. `verify_installer.ps1` can test a temporary per-user installation only when PDF Studio is not already installed.
 
 The source is separated into `pdf_workflow.py` (sessions and output validation), `jobs.py` (isolated processing), `pdf_tools.py` (PDF primitives) and `app.py` (desktop UI).
 
 `verify_stability.py` covers disappearing and changed inputs, changes during processing, transparent image rendering, preview/settings consistency, invalid margins, page-range errors and atomic save failure/retry. Input version checks use size, modification time and file identity; they are change detection, not a file lock or a content hash.
+
+`verify_png.py` checks PNG pixels, white/transparent backgrounds, rotated and cropped pages, all supported DPIs, page order and ZIP integrity, oversized-page rejection, Unicode filenames, saving and continuation through real spawned workers.
 
 The executable is unsigned. See [the UX audit](docs/UX-AUDIT.md) and [the implementation notes](docs/UX-RELEASE.md).

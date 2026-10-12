@@ -74,7 +74,7 @@ class App(TkinterDnD.Tk):
             button.pack(side="left", padx=5)
             self.nav[mode] = button
         for text, modes in [
-            ("CONVERT PDF ▾", ["Images to PDF", "PDF to JPG"]),
+            ("CONVERT PDF ▾", ["Images to PDF", "PDF to JPG", "PDF to PNG"]),
             ("ALL PDF TOOLS ▾", list(TOOLS)),
         ]:
             button = self.button(header, text, lambda: None, small=True)
@@ -856,7 +856,7 @@ class App(TkinterDnD.Tk):
                          state="readonly").pack(fill="x")
             self.button(self.options, "Update preview", self.refresh).pack(fill="x", pady=14)
             self.label(self.options, "Long text shrinks to fit the page.", 9, color=MUTED).pack(anchor="w")
-        elif self.mode in ("PDF to JPG", "Page numbers", "Crop PDF"):
+        elif self.mode in ("PDF to JPG", "PDF to PNG", "Page numbers", "Crop PDF"):
             self.feature_vars = {}
 
             def field(key, title, choices=None):
@@ -875,6 +875,13 @@ class App(TkinterDnD.Tk):
                 field("jpg_dpi", "Resolution (DPI)", ["72", "150", "300"])
                 field("jpg_quality", "JPG quality (%)", ["60", "85", "95"])
                 note = "One image per page. Multiple images are saved in a ZIP. Pages export in document order."
+            elif self.mode == "PDF to PNG":
+                field("png_dpi", "Resolution (DPI)", ["72", "150", "300"])
+                var = self.variable("png_transparent", boolean=True)
+                self.feature_vars["png_transparent"] = var
+                tk.Checkbutton(self.options, text="Transparent background", variable=var,
+                               bg=WHITE, font=("Segoe UI", 11)).pack(anchor="w", pady=14)
+                note = "PNG preserves rendered detail without JPG compression. Only unpainted areas become transparent; white shapes stay white. Multiple pages save in ZIP, in document order."
             elif self.mode == "Page numbers":
                 field("number_start", "Starting number")
                 field("number_size", "Font size (8–40 pt)")
@@ -1544,9 +1551,10 @@ class App(TkinterDnD.Tk):
         self.label(self.body, "Your result is ready", 30, True, bg=BG).pack(
             pady=(10, 10)
         )
+        kind = Path(result["images"][0]).suffix[1:].upper() + " image(s)" if result.get("images") else "PDF file(s)"
         self.label(
             self.body,
-            f"{len(result.get('files', result['pdfs']))} {'JPG image(s)' if result.get('images') else 'PDF file(s)'} · {result['pages']} pages · {size_text(Path(result['path']).stat().st_size)}",
+            f"{len(result.get('files', result['pdfs']))} {kind} · {result['pages']} pages · {size_text(Path(result['path']).stat().st_size)}",
             14,
             bg=BG,
         ).pack(pady=10)
@@ -1621,7 +1629,7 @@ class App(TkinterDnD.Tk):
             defaultextension=source.suffix,
             filetypes=[
                 (
-                    { ".zip": "ZIP archive", ".jpg": "JPG image" }.get(source.suffix, "PDF document"),
+                    { ".zip": "ZIP archive", ".jpg": "JPG image", ".png": "PNG image" }.get(source.suffix, "PDF document"),
                     "*" + source.suffix,
                 )
             ],
