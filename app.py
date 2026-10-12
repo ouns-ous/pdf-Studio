@@ -23,7 +23,44 @@ from preview_cache import PreviewCache
 from image_tools import page_image, validate_image_margin, ImageLayoutError
 from source_files import checked_version, source_errors, SourceFileError
 
-BG, WHITE, INK, MUTED, RED = "#f5f5fa", "#ffffff", "#33333b", "#70717e", "#ee2e2e"
+BG, WHITE, INK, MUTED, RED = "#f4f6fc", "#ffffff", "#24324b", "#62718b", "#c93445"
+ACCENT = "#5365df"
+TOOL_PALETTE = {
+    "Organize PDF": ("#eaf1ff", "#315ba8", "#dce8ff"),
+    "Optimize PDF": ("#e6f6ee", "#23734f", "#d4efdf"),
+    "Convert PDF": ("#fff5d9", "#806016", "#ffedb5"),
+    "Edit PDF": ("#f1eafb", "#7650a6", "#e6d9f6"),
+    "PDF Security": ("#e4f4f8", "#246c81", "#d1eaf1"),
+}
+
+
+def rounded_control(parent, button, fill, hover, height=None):
+    """Keep native button keyboard behavior inside a responsive rounded surface."""
+    button.update_idletasks()
+    surface = tk.Canvas(parent, bg=parent.cget("bg"), highlightthickness=0,
+                        height=height or button.winfo_reqheight() + 20)
+    button.configure(bg=fill, activebackground=hover, highlightthickness=0)
+    window = surface.create_window(12, 12, window=button, anchor="nw")
+
+    def paint(event=None, color=fill):
+        width, size = surface.winfo_width(), surface.winfo_height()
+        radius = min(22, size // 2)
+        surface.delete("surface")
+        surface.create_polygon(
+            radius, 1, width-radius, 1, width-1, 1, width-1, radius,
+            width-1, size-radius, width-1, size-1, width-radius, size-1,
+            radius, size-1, 1, size-1, 1, size-radius, 1, radius, 1, 1,
+            smooth=True, splinesteps=24, fill=color, outline="", tags="surface")
+        surface.tag_lower("surface")
+        surface.itemconfigure(window, width=max(1, width-24), height=max(1, size-24))
+
+    surface.bind("<Configure>", paint)
+    button.bind("<Enter>", lambda e: (button.configure(bg=hover), paint(color=hover)))
+    button.bind("<Leave>", lambda e: (button.configure(bg=fill), paint()))
+    button.bind("<FocusIn>", lambda e: surface.configure(highlightthickness=2,
+                                                        highlightbackground=ACCENT))
+    button.bind("<FocusOut>", lambda e: surface.configure(highlightthickness=0))
+    return surface
 
 
 def size_text(value):
@@ -60,7 +97,7 @@ class App(TkinterDnD.Tk):
         self.validation = tk.StringVar()
         style = ttk.Style(self)
         style.theme_use("clam")
-        style.configure("TProgressbar", background=RED, troughcolor=BG)
+        style.configure("TProgressbar", background=ACCENT, troughcolor=BG)
         header = tk.Frame(self, bg=WHITE)
         header.pack(fill="x")
         logo = self.button(header, "PDF Studio", self.show_home)
@@ -135,9 +172,9 @@ class App(TkinterDnD.Tk):
             text=text,
             command=command,
             font=("Segoe UI", 10 if small else 11, "bold"),
-            bg=RED if accent else WHITE,
+            bg=ACCENT if accent else WHITE,
             fg=WHITE if accent else INK,
-            activebackground="#d7232b" if accent else "#eeeef4",
+            activebackground="#4052c9" if accent else "#eaf0fb",
             activeforeground=WHITE if accent else INK,
             relief="flat",
             bd=0,
@@ -146,7 +183,8 @@ class App(TkinterDnD.Tk):
             pady=9,
             takefocus=True,
             highlightthickness=1,
-            highlightcolor=RED,
+            highlightcolor=ACCENT,
+            highlightbackground=WHITE,
         )
         button.bind("<Return>", lambda e: button.invoke())
         return button
@@ -226,7 +264,8 @@ class App(TkinterDnD.Tk):
         self.label(
             self.body,
             "Choose a tool, add your files, and make it yours. Everything stays on your computer.",
-            15,
+            13,
+            color=MUTED,
             bg=BG,
         ).pack(pady=(0, 25))
         filters = tk.Frame(self.body, bg=BG)
@@ -234,10 +273,13 @@ class App(TkinterDnD.Tk):
         for name in ["All", "Organize PDF", "Optimize PDF", "Convert PDF", "Edit PDF", "PDF Security"]:
             button = self.button(filters, name, lambda c=name: self.show_home(c))
             button.config(
-                bg=INK if name == category else WHITE,
-                fg=WHITE if name == category else INK,
+                fg=WHITE if name == category else TOOL_PALETTE.get(name, (WHITE, INK))[1],
             )
-            button.pack(side="left", padx=6)
+            fill = ACCENT if name == category else WHITE
+            pill = rounded_control(filters, button, fill,
+                                   "#4052c9" if name == category else "#eaf0fb", 52)
+            pill.configure(width=button.winfo_reqwidth()+24)
+            pill.pack(side="left", padx=4)
         wrap, canvas, grid = self.scroll_area(self.body)
         wrap.pack(fill="both", expand=True, padx=26, pady=24)
         cards = []
@@ -258,8 +300,12 @@ class App(TkinterDnD.Tk):
                 height=7,
                 padx=22,
                 pady=20,
+                fg=TOOL_PALETTE[group][1],
+                activeforeground=TOOL_PALETTE[group][1],
             )
-            cards.append(card)
+            fill, _, hover = TOOL_PALETTE[group]
+            surface = rounded_control(grid, card, fill, hover, 214)
+            cards.append((surface, card))
 
         def layout(event):
             columns = max(2, min(4, event.width // 280))
@@ -267,8 +313,8 @@ class App(TkinterDnD.Tk):
                 grid.grid_columnconfigure(
                     c, weight=1 if c < columns else 0, uniform="home"
                 )
-            for i, card in enumerate(cards):
-                card.grid(
+            for i, (surface, card) in enumerate(cards):
+                surface.grid(
                     row=i // columns, column=i % columns, sticky="nsew", padx=9, pady=9
                 )
                 card.config(wraplength=max(180, event.width // columns - 70))
@@ -550,7 +596,7 @@ class App(TkinterDnD.Tk):
         self.clear_body()
         s = self.session
         for name, button in self.nav.items():
-            button.config(fg=RED if name == self.mode else INK)
+            button.config(fg=ACCENT if name == self.mode else INK)
         if not s.files:
             toolbar = tk.Frame(self.body, bg=BG)
             toolbar.pack(fill="x", padx=16, pady=12)
@@ -570,7 +616,9 @@ class App(TkinterDnD.Tk):
                 accent=True,
             )
             select.config(font=("Segoe UI", 20, "bold"), padx=65, pady=22)
-            select.pack(pady=25)
+            select_surface = rounded_control(self.body, select, ACCENT, "#4052c9", 104)
+            select_surface.configure(width=select.winfo_reqwidth()+24)
+            select_surface.pack(pady=25)
             self.label(
                 self.body, "or drop your files here", 12, color=MUTED, bg=BG
             ).pack()

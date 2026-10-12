@@ -2,6 +2,8 @@
 
 A local Windows PDF app with fourteen working tools: Merge, Split, Compress, Organize, Remove pages, Rotate, Images to PDF, Protect, Unlock, Watermark, PDF to JPG, PDF to PNG, Page numbers and Crop PDF.
 
+The interface uses rounded tool cards and category filters, with soft blue, green, yellow, purple and teal backgrounds. Indigo primary actions and visible keyboard focus keep the workspace easy to navigate.
+
 ## Changes in 1.5.0
 
 **PDF to PNG** joins the Convert PDF tools. Export all pages or a selected range at 72, 150 or 300 DPI, with a white or transparent background. PNG uses lossless compression, making it useful for text and graphics. Transparency preserves unpainted areas; it does not erase white graphics or scanned page backgrounds.
